@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Importaciones Colombia — Dashboard</title>
+<style>
+  .viz-root {
+    color-scheme: light;
+    --surface-1:      #fcfcfb;
+    --page:           #f9f9f7;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --gridline:       #e1e0d9;
+    --baseline:       #c3c2b7;
+    --border:         rgba(11,11,11,0.10);
+    --series-1: #2a78d6; /* blue */
+    --series-2: #eb6834; /* orange */
+    --series-3: #1baf7a; /* aqua */
+    --series-4: #eda100; /* yellow */
+    --series-5: #e87ba4; /* magenta */
+    --series-6: #008300; /* green */
+    --series-7: #4a3aa7; /* violet */
+    --series-8: #e34948; /* red */
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) .viz-root {
+      color-scheme: dark;
+      --surface-1:      #1a1a19;
+      --page:           #0d0d0d;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #898781;
+      --gridline:       #2c2c2a;
+      --baseline:       #383835;
+      --border: rgba(255,255,255,0.10);
+      --series-1: #3987e5;
+      --series-2: #d95926;
+      --series-3: #199e70;
+      --series-4: #c98500;
+      --series-5: #d55181;
+      --series-6: #008300;
+      --series-7: #9085e9;
+      --series-8: #e66767;
+    }
+  }
+  :root[data-theme="dark"] .viz-root {
+    color-scheme: dark;
+    --surface-1:      #1a1a19;
+    --page:           #0d0d0d;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --gridline:       #2c2c2a;
+    --baseline:       #383835;
+    --border: rgba(255,255,255,0.10);
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
+    --series-7: #9085e9;
+    --series-8: #e66767;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--text-primary);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .page {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 24px 20px 60px;
+  }
+  header.top {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  header.top h1 {
+    font-size: 1.4rem;
+    margin: 0;
+  }
+  header.top p {
+    margin: 4px 0 0;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+  }
+  .filters {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 8px 12px;
+  }
+  .filters label {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+  }
+  .filters input[type="month"], .filters select {
+    font: inherit;
+    font-size: 0.85rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 8px;
+    background: var(--surface-1);
+    color: var(--text-primary);
+  }
+  .filters button {
+    font: inherit;
+    font-size: 0.85rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 12px;
+    background: var(--series-1);
+    color: white;
+    cursor: pointer;
+  }
+
+  .stat-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .stat-tile {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 14px 16px;
+  }
+  .stat-tile .label {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+  }
+  .stat-tile .value {
+    font-size: 1.5rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  figure.chart-card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px 18px 8px;
+    margin: 0 0 20px;
+  }
+  figure.chart-card .card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+  figure.chart-card h2 {
+    font-size: 1rem;
+    margin: 0;
+  }
+  figure.chart-card .subtitle {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin: 2px 0 0;
+  }
+  .table-toggle {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 3px 9px;
+    cursor: pointer;
+  }
+  .chart-wrap { position: relative; }
+  .chart-wrap canvas { max-width: 100%; }
+
+  table.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+  }
+  table.data-table th, table.data-table td {
+    text-align: right;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--gridline);
+    font-variant-numeric: tabular-nums;
+  }
+  table.data-table th:first-child, table.data-table td:first-child {
+    text-align: left;
+    font-variant-numeric: normal;
+  }
+  table.data-table th {
+    color: var(--text-secondary);
+    font-weight: 500;
+  }
+
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+  }
+  @media (max-width: 860px) {
+    .grid-2 { grid-template-columns: 1fr; }
+  }
+
+  .tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 12px;
+  }
+  .tabs button {
+    font: inherit;
+    font-size: 0.85rem;
+    border: 1px solid var(--border);
+    background: var(--surface-1);
+    color: var(--text-secondary);
+    border-radius: 8px;
+    padding: 6px 14px;
+    cursor: pointer;
+  }
+  .tabs button.active {
+    background: var(--series-1);
+    color: white;
+    border-color: var(--series-1);
+  }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  .breadcrumb {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+  }
+  .breadcrumb button {
+    font: inherit;
+    color: var(--series-1);
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    text-decoration: underline;
+  }
+
+  .empty-state {
+    text-align: center;
+    padding: 30px;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+  }
+</style>
+</head>
+<body>
+<div class="viz-root page">
+
+  <header class="top">
+    <div>
+      <h1>Importaciones — Colombia</h1>
+      <p id="rangeLabel">Base DAATER ONLINE 2025-2026</p>
+    </div>
+    <div class="filters">
+      <label for="fromInput">Desde</label>
+      <input type="month" id="fromInput" />
+      <label for="toInput">Hasta</label>
+      <input type="month" id="toInput" />
+      <button id="applyFilter">Aplicar</button>
+      <button id="clearFilter" style="background:none;color:var(--text-secondary)">Limpiar</button>
+    </div>
+  </header>
+
+  <div class="stat-row" id="statRow"></div>
+
+  <figure class="chart-card">
+    <div class="card-head">
+      <div>
+        <h2 id="moleculaTitle">Importaciones por molécula (principio activo)</h2>
+        <p class="subtitle">Top 25 por valor FOB. Click en una barra para ver el desglose por marca.</p>
+      </div>
+      <button class="table-toggle" data-toggle="molecula">Ver tabla</button>
+    </div>
+    <div class="breadcrumb" id="moleculaBreadcrumb" style="display:none">
+      <button id="backToMoleculas">&larr; Volver a moléculas</button>
+    </div>
+    <div class="chart-wrap" style="height:420px">
+      <canvas id="moleculaChart"></canvas>
+    </div>
+    <table class="data-table" id="moleculaTable" style="display:none"></table>
+  </figure>
+
+  <figure class="chart-card">
+    <div class="card-head">
+      <div>
+        <h2>Evolución mensual</h2>
+        <p class="subtitle">Valor FOB y CIF importado por mes.</p>
+      </div>
+      <button class="table-toggle" data-toggle="month">Ver tabla</button>
+    </div>
+    <div class="chart-wrap" style="height:280px">
+      <canvas id="monthChart"></canvas>
+    </div>
+    <table class="data-table" id="monthTable" style="display:none"></table>
+  </figure>
+
+  <div class="tabs" id="secondaryTabs">
+    <button data-tab="tariff" class="active">Por partida arancelaria</button>
+    <button data-tab="country">Por país de origen</button>
+    <button data-tab="importer">Por importador</button>
+  </div>
+
+  <div class="tab-panel active" id="panel-tariff">
+    <figure class="chart-card">
+      <div class="card-head">
+        <h2>Valor FOB por partida arancelaria</h2>
+        <button class="table-toggle" data-toggle="tariff">Ver tabla</button>
+      </div>
+      <div class="chart-wrap" style="height:300px"><canvas id="tariffChart"></canvas></div>
+      <table class="data-table" id="tariffTable" style="display:none"></table>
+    </figure>
+  </div>
+  <div class="tab-panel" id="panel-country">
+    <figure class="chart-card">
+      <div class="card-head">
+        <h2>Valor FOB por país de origen</h2>
+        <button class="table-toggle" data-toggle="country">Ver tabla</button>
+      </div>
+      <div class="chart-wrap" style="height:300px"><canvas id="countryChart"></canvas></div>
+      <table class="data-table" id="countryTable" style="display:none"></table>
+    </figure>
+  </div>
+  <div class="tab-panel" id="panel-importer">
+    <figure class="chart-card">
+      <div class="card-head">
+        <h2>Valor FOB por importador</h2>
+        <button class="table-toggle" data-toggle="importer">Ver tabla</button>
+      </div>
+      <div class="chart-wrap" style="height:300px"><canvas id="importerChart"></canvas></div>
+      <table class="data-table" id="importerTable" style="display:none"></table>
+    </figure>
+  </div>
+
+</div>
+
+<script src="/vendor/chart.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

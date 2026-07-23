@@ -1,0 +1,7 @@
+node_modules/
+.env.local
+output/*.xlsx
+daater.db
+daater.db-wal
+daater.db-shm
+.claude/

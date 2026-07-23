@@ -1,0 +1,7 @@
+node_modules
+output
+daater.db
+daater.db-wal
+daater.db-shm
+.env.local
+.git

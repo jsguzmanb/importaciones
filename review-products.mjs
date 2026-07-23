@@ -1,0 +1,41 @@
+// Reporta las descripciones distintas cuya extracción de molecula/marca quedó en baja
+// confianza, ordenadas por cuántas filas afectan (para priorizar las que más pesan).
+// Cada línea trae el hash a usar como clave en product-overrides.json.
+// Uso: node review-products.mjs [N]   (N = cuántas descripciones distintas mostrar, default 30)
+import { config } from './config.js';
+import { openDb } from './db.js';
+import { hashDescripcion } from './product-extractor.js';
+
+const TABLE = 'importaciones';
+const DESC_COLUMN = 'Desc Completa De Producto';
+const limit = Number(process.argv[2]) || 30;
+
+function main() {
+  const db = openDb(config.dbFile);
+  const rows = db
+    .prepare(
+      `SELECT "${DESC_COLUMN}" AS descripcion, molecula, marca, COUNT(*) as n
+       FROM ${TABLE}
+       WHERE extraction_confidence = 'low' AND "${DESC_COLUMN}" IS NOT NULL
+       GROUP BY "${DESC_COLUMN}"
+       ORDER BY n DESC
+       LIMIT ?`
+    )
+    .all(limit);
+
+  console.log(`Top ${rows.length} descripciones de baja confianza (por filas afectadas):\n`);
+  for (const row of rows) {
+    console.log('='.repeat(80));
+    console.log(`hash: ${hashDescripcion(row.descripcion)}  |  filas: ${row.n}`);
+    console.log(`molecula detectada: ${row.molecula ?? '(ninguna)'}  |  marca detectada: ${row.marca ?? '(ninguna)'}`);
+    console.log(`texto: ${row.descripcion.slice(0, 300)}${row.descripcion.length > 300 ? '...' : ''}`);
+  }
+
+  console.log(`\nPara corregir, agrega en product-overrides.json bajo "overrides":`);
+  console.log(`  "<hash>": { "molecula": "...", "marca": "..." }`);
+  console.log('Luego corre "node backfill-products.mjs" de nuevo para aplicar los cambios.');
+
+  db.close();
+}
+
+main();

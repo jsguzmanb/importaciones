@@ -1,0 +1,4 @@
+{
+  "_comment": "Correcciones manuales a la extracción automática de molecula/marca. La clave es un hash corto (sha1, primeros 12 caracteres) del texto exacto de 'Desc Completa De Producto', calculado con hashDescripcion() en product-extractor.js. Cada entrada puede definir molecula y/o marca; el valor definido aquí siempre gana sobre el resultado del regex. Usa el reporte de baja confianza (npm run review-products) para encontrar qué hashes revisar.",
+  "overrides": {}
+}
