@@ -1,0 +1,7 @@
+{
+  "framework": null,
+  "installCommand": "npm pkg delete scripts.postinstall dependencies.playwright && npm install",
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api" }
+  ]
+}

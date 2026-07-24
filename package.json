@@ -7,14 +7,14 @@
     "postinstall": "playwright install chromium",
     "search": "node search-daater.mjs",
     "dashboard": "node server.mjs",
-    "deploy": "flyctl deploy",
-    "deploy:db": "powershell -File deploy/upload-db.ps1"
+    "vendor-chart": "node -e \"require('fs').copyFileSync('node_modules/chart.js/dist/chart.umd.min.js', 'public/vendor/chart.js')\"",
+    "deploy": "vercel deploy --prod"
   },
   "dependencies": {
-    "better-sqlite3": "^13.0.1",
     "chart.js": "^4.5.1",
     "dotenv": "^16.4.5",
     "express": "^5.2.1",
+    "pg": "^8.22.0",
     "playwright": "^1.47.0",
     "xlsx": "^0.18.5"
   }

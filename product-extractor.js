@@ -205,12 +205,130 @@ function cleanMolecula(raw) {
     }
   }
 
+  // Paréntesis que es solo una nota de dosis/unidad extraíble, no parte del nombre
+  // (ej. "IMIGLUCERASA (400 U EXTRAIBLES)", "VELAGLUCERASA ALFA (400 UNIDADES),
+  // 10,00000 MG", "IMIGLUCERASA (DOSIS EXTRAIBLE 400U)") -- distinto de paréntesis
+  // que desambiguan el compuesto (ej. "ANIFROLUMAB (MEDI-546)", "ADRENALINA
+  // (EPINEFRINA)"), que no contienen estas palabras clave y se conservan. Se aplica
+  // antes del corte de dosis final porque el paréntesis puede quedar en medio del
+  // valor (seguido de más dosis, ej. ", 10,00000 MG").
+  value = value.replace(/\s*\(\s*(?:DOSIS\s+)?(?:EXTRAIBLES?\s+)?[\d.,]*\s*(?:U|UI|UNIDADES?)\s*(?:EXTRAIBLES?)?\s*\)/i, '');
+
+  // Paréntesis que resume la dosis/ratio de una combinación de varios principios activos
+  // (ej. "ELEXACAFTOR/TEZACAFTOR/IVACAFTOR + IVACAFTOR (50/25/37,5 MG + 75 MG)"): el
+  // contenido es solo números, separadores ("/", "+", "Y") y unidades (MG/G/ML/UI/MCG),
+  // nunca texto -- a diferencia de paréntesis que desambiguan el compuesto (ej.
+  // "ANIFROLUMAB (MEDI-546)"), que sí contienen letras propias del nombre y no calzan con
+  // este patrón.
+  value = value.replace(/\s*\(\s*(?:[\d.,\/+]|MG|G|ML|UI|MCG|%|Y|\s)+\)\s*$/i, '');
+  // Puede venir seguido de texto de forma farmacéutica/nombre comercial (ej. "...
+  // (100/50/75 MG + 150 MG) TABLETA (TRIKAFTA®)") cuando el corte de límite de campo
+  // arrastró de más -- ese texto colgante nunca es parte del nombre de la molécula. Se
+  // reconoce por empezar con una palabra de forma farmacéutica conocida (a diferencia de,
+  // ej., "PROPINOX (+5%) Y CLONIXINATO DE LISINA", donde lo que sigue es otro ingrediente
+  // real que debe conservarse).
+  const DOSAGE_FORM_WORDS = 'TABLETA|TABLETAS|CAPSULA|CAPSULAS|COMPRIMIDO|COMPRIMIDOS|SOLUCION|JARABE|CREMA|GEL|AMPOLLA|AMPOLLAS|FRASCO|VIAL|PARCHE|SUSPENSION|GRANULOS';
+  value = value.replace(
+    new RegExp(`\\s*\\(\\s*(?:[\\d.,\\/+]|MG|G|ML|UI|MCG|%|Y|\\s)+\\)\\s*(?:${DOSAGE_FORM_WORDS})\\b.*$`, 'i'),
+    ''
+  );
+
+  // Combinaciones de varios principios activos separados por "/" con dosis inline por
+  // cada uno (ej. "ELEXACAFTOR 100MG/TEZACAFTOR 50MG/IVACAFTOR 75MG Y IVACAFTOR 150MG"):
+  // el corte de dosis final de más abajo es no-global y solo busca la PRIMERA ocurrencia
+  // de "<numero><unidad>", así que arrastraría ".*$" desde ahí y se comería el resto de
+  // los principios activos, dejando solo el primero. Para evitar mangling en formatos más
+  // complejos (dosis con comas, cláusulas "EQUIVALENTE A" embebidas, paréntesis, ej. la
+  // fórmula de PEDIALYTE), solo se activa cuando CADA segmento separado por "/"/"Y"/"+"
+  // EMPIEZA con "<nombre> <numero><unidad>" sin comas ni paréntesis antes de la dosis —
+  // la forma exacta de combinaciones simples tipo Trikafta. El ÚLTIMO segmento puede
+  // traer texto colgante después de su dosis (ej. "IVACAFTOR 150MG TABLETA (TRIKAFTA®)")
+  // cuando el corte de límite de campo cayó después de "CONCENTRACION" en vez de justo
+  // tras el valor; ese texto se descarta junto con la dosis.
+  const DOSE_SEGMENT_START = /^([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s-]*?)\s+[\d.,]+\s*(MG|G|ML|UI|MCG|%)\b/i;
+  if (/\//.test(value)) {
+    const parts = value.split(/\s*\/\s*|\s+Y\s+|\s*\+\s*/i).map((s) => s.trim()).filter(Boolean);
+    if (parts.length > 1 && parts.every((part) => DOSE_SEGMENT_START.test(part))) {
+      const cleanedParts = parts
+        .map((part) => DOSE_SEGMENT_START.exec(part)[1].trim())
+        .filter(Boolean);
+      const seen = new Set();
+      const deduped = cleanedParts.filter((part) => {
+        const key = part.toUpperCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      if (deduped.length > 1) value = deduped.join('/');
+    }
+  }
+
+  // Lista de principios activos ya sin dosis (ej. tras el corte de paréntesis-ratio de
+  // más arriba, "ELEXACAFTOR/TEZACAFTOR/IVACAFTOR + IVACAFTOR") con un ingrediente
+  // repetido literalmente (ivacaftor aparece tanto en el combinado como en la tableta
+  // booster por separado): deduplicar es seguro aquí porque cada segmento es un nombre
+  // "puro" (sin números ni paréntesis), así que un duplicado exacto es sencillamente el
+  // mismo principio activo mencionado dos veces, no información distinta perdida.
+  if (/[/]|\bY\b|\+/i.test(value)) {
+    const plainParts = value.split(/\s*\/\s*|\s+Y\s+|\s*\+\s*/i).map((s) => s.trim()).filter(Boolean);
+    const PLAIN_NAME = /^[A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ\s-]*$/i;
+    if (plainParts.length > 1 && plainParts.every((part) => PLAIN_NAME.test(part))) {
+      const seen = new Set();
+      const deduped = plainParts.filter((part) => {
+        const key = part.toUpperCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      if (deduped.length < plainParts.length && deduped.length > 1) value = deduped.join('/');
+    }
+  }
+
   // Corta dosis/unidades finales: números, comas decimales, mg/g/ml/ui.
   value = value.replace(/[\d.,]+\s*(MG|G|ML|UI|MCG|%)\b.*$/i, '');
+
   value = value.replace(/\s+/g, ' ').trim();
   value = value.replace(/[.,;:\s]+$/, '').trim();
+  // Paréntesis huérfano de apertura (sin su cierre) dejado por el corte de dosis final
+  // cuando el paréntesis solo envolvía la dosis (ej. "IVACAFTOR (150 mg)" -> "IVACAFTOR
+  // (" tras cortar en el número): a diferencia de paréntesis balanceados que sí forman
+  // parte del nombre (ej. "TERIPARATIDA (ORIGEN ADN RECOMBINANTE)"), un "(" colgante al
+  // final nunca es información válida del nombre.
+  if (value.endsWith('(')) {
+    value = value.slice(0, -1).trim();
+    value = value.replace(/[.,;:\s]+$/, '').trim();
+  }
+  // Normaliza espacios sueltos alrededor del separador "/" en combinaciones
+  // (ej. "ELEXACAFTOR/TEZACAFTOR/ IVACAFTOR" -> "ELEXACAFTOR/TEZACAFTOR/IVACAFTOR"):
+  // es puramente cosmético, nunca cambia el nombre de un principio activo.
+  value = value.replace(/\s*\/\s*/g, '/');
 
-  return value || raw.trim();
+  // Uniforma a mayúsculas: el texto fuente mezcla mayúsculas/minúsculas según el envío
+  // (ej. "ECULIZUMAB" y "Eculizumab" para el mismo principio activo), y como "molecula"
+  // se usa para agrupar (gráficas, focus-molecules.json), una diferencia de casing
+  // fragmentaría el mismo principio activo en barras/filas separadas. No afecta a
+  // "marca", que sí se muestra con su casing original de marca comercial.
+  const final = canonicalizeMolecula(value || raw.trim());
+  // "µ" (signo micro, U+00B5) se convierte con .toUpperCase() a "Μ" (mu griega
+  // mayúscula, U+039C) en vez de a una letra ASCII -- visualmente casi idéntica pero un
+  // carácter distinto, lo que rompería comparaciones/agrupación exactas más adelante. Se
+  // normaliza a la "u" ASCII antes de mayuscular (ej. "µg" -> "UG"), preservando el
+  // significado ("micro") sin introducir un carácter Unicode inesperado.
+  return final.replace(/[µμ]/g, 'u').toUpperCase();
+}
+
+// Variantes conocidas (typos de digitación, separadores inconsistentes) que el
+// pipeline de extracción por sí solo no puede normalizar porque dependen del texto
+// exacto de cada envío. Se mantiene como mapa explícito en vez de heurística general
+// porque cada caso viene de una causa distinta (typo puntual vs. formato variable) y
+// una normalización genérica arriesgaría fusionar moléculas que sí son distintas.
+const MOLECULA_CANONICAL_MAP = new Map([
+  ['EELEXACAFTOR/TEZACAFTOR/IVACAFTOR', 'ELEXACAFTOR/TEZACAFTOR/IVACAFTOR'],
+]);
+
+function canonicalizeMolecula(value) {
+  const key = value.toUpperCase();
+  return MOLECULA_CANONICAL_MAP.get(key) ?? value;
 }
 
 // Detecta el patrón "MEDICAMENTO VITAL NO DISPONIBLE" (importación a nombre de
@@ -219,8 +337,15 @@ function isVitalNoDisponible(text) {
   return /MEDICAMENTO VITAL NO DISPONIBLE/i.test(text);
 }
 
+// Etiquetas de "NOMBRE COMERCIAL" -- a diferencia de PRODUCTO_LABELS (que incluye el
+// genérico "PRODUCTO"/"Producto"), estas SIEMPRE nombran específicamente el producto
+// comercial, nunca arrastran cláusulas regulatorias completas -- por eso son seguras
+// como último recurso para leer el nombre de marca en texto plano (ver más abajo),
+// mientras que "PRODUCTO" a secas no lo es.
+const NOMBRE_COMERCIAL_LABELS = ['NOMBRE COMERCIAL DEL PRODUCTO', 'NOMBRE COMERCIAL'];
+
 // Extrae marca con cadena de fallback: MARCA explícita -> símbolo ®/™/© en la línea de
-// PRODUCTO/NOMBRE COMERCIAL -> null.
+// PRODUCTO/NOMBRE COMERCIAL -> valor plano de NOMBRE COMERCIAL -> null.
 function extractMarca(text) {
   const explicit = extractField(text, MARCA_LABELS, FIELD_BOUNDARY_LABELS);
   if (explicit && !/^(N\/?A|NO APLICA|NO TIENE)$/i.test(explicit.value)) {
@@ -238,6 +363,24 @@ function extractMarca(text) {
     if (brandSymbolMatch) {
       const candidate = brandSymbolMatch[1].trim().split(/\s+/).slice(-3).join(' ');
       return { value: cleanMarca(candidate), confidence: 'medium', source: `${label}+symbol` };
+    }
+  }
+
+  // Sin símbolo ®/™/© cerca (ej. "MARCA: NO APLICA, NOMBRE COMERCIAL: Soliris 300 mg",
+  // el patrón usado por INVIMA para biológicos importados bajo protocolo/resolución en
+  // vez de registro sanitario estándar): se usa el valor de "NOMBRE COMERCIAL" tal cual,
+  // sin requerir el símbolo. Nunca se hace esto con el label genérico "PRODUCTO" (fuera
+  // de NOMBRE_COMERCIAL_LABELS) porque ese campo suele arrastrar la descripción
+  // regulatoria completa, no solo el nombre comercial.
+  const plain = extractField(text, NOMBRE_COMERCIAL_LABELS, FIELD_BOUNDARY_LABELS);
+  if (plain && !/^(N\/?A|NO APLICA|NO TIENE)$/i.test(plain.value)) {
+    // Corta dosis/concentración final (ej. "Soliris 300 mg" -> "Soliris"), igual que se
+    // hace con "molecula", para que la marca quede consistente con el resto de la data
+    // (ej. "JARDIANCE" nunca "JARDIANCE 25 MG").
+    const withoutDose = plain.value.replace(/[\d.,]+\s*(MG|G|ML|UI|MCG|%)\b.*$/i, '').trim();
+    const cleaned = cleanMarca(withoutDose || plain.value);
+    if (cleaned && cleaned.length <= 60) {
+      return { value: cleaned, confidence: 'medium', source: `${plain.label}+plain` };
     }
   }
 
@@ -275,7 +418,26 @@ export function extractProduct(descripcion) {
   const vitalNoDisponible = isVitalNoDisponible(text);
 
   const molecula = extractMolecula(text);
-  const marca = extractMarca(text);
+  let marca = extractMarca(text);
+
+  // El fallback "+plain" de extractMarca() (NOMBRE COMERCIAL sin símbolo ®/™/©) a veces
+  // recupera un valor que es, en esencia, el mismo nombre que ya quedó en "molecula"
+  // (ej. productos genéricos donde el campo NOMBRE COMERCIAL solo repite el principio
+  // activo, a veces con un sufijo de sal/forma distinto: "NOMBRE COMERCIAL: DOCETAXEL
+  // 120MG/6ML" con molecula "DOCETAXEL ANHIDRO", o "NOMBRE COMERCIAL_ METOTREXATO 2,5
+  // MG X 100 COMP." con molecula "METOTREXATO"). Se compara por prefijo (uno empieza
+  // con el otro), no por igualdad exacta, para cubrir también el caso del sufijo de
+  // sal. Mostrar la misma palabra en molecula Y marca no aporta información en el
+  // desglose por marca del dashboard, así que se descarta -- solo para esta fuente,
+  // nunca para MARCA explícita o el fallback por símbolo, donde una coincidencia sí
+  // podría ser intencional.
+  if (marca.source?.endsWith('+plain') && molecula.value && marca.value) {
+    const m = molecula.value.toUpperCase();
+    const b = marca.value.toUpperCase();
+    if (m.startsWith(b) || b.startsWith(m)) {
+      marca = { value: null, confidence: 'low', source: null };
+    }
+  }
 
   const confidence = molecula.confidence === 'high' && marca.confidence !== 'low' ? 'high' : 'low';
 

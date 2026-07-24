@@ -1,9 +1,6 @@
-node_modules/
+node_modules
 .env.local
-output/*.xlsx
+output
 daater.db
 daater.db-wal
 daater.db-shm
-.claude/
-
-.vercel

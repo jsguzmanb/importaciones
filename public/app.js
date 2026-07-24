@@ -1,5 +1,14 @@
 const fmtUSD = (n) => (n == null ? '—' : new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n));
 const fmtInt = (n) => (n == null ? '—' : new Intl.NumberFormat('es-CO').format(n));
+const fmtUSDCompact = (n) =>
+  n == null
+    ? '—'
+    : new Intl.NumberFormat('es-CO', {
+        style: 'currency',
+        currency: 'USD',
+        notation: 'compact',
+        maximumFractionDigits: 1,
+      }).format(n);
 
 const root = document.documentElement;
 const isDark = () =>
@@ -22,7 +31,7 @@ function chartDefaults() {
   return { grid, muted, text };
 }
 
-let state = { from: '', to: '' };
+let state = { from: '', to: '', focus: true };
 const charts = {};
 const lastData = {};
 
@@ -30,6 +39,7 @@ function qs(params) {
   const p = new URLSearchParams();
   if (params.from) p.set('from', params.from);
   if (params.to) p.set('to', params.to);
+  if (params.focus) p.set('focus', '1');
   const s = p.toString();
   return s ? `?${s}` : '';
 }
@@ -43,14 +53,17 @@ async function fetchJSON(url) {
 function renderStatRow(summary) {
   const tiles = [
     { label: 'Filas cargadas', value: fmtInt(summary.filas) },
-    { label: 'Valor FOB total', value: fmtUSD(summary.fobTotal) },
-    { label: 'Valor CIF total', value: fmtUSD(summary.cifTotal) },
+    { label: 'Valor FOB total', value: fmtUSDCompact(summary.fobTotal), title: fmtUSD(summary.fobTotal) },
+    { label: 'Valor CIF total', value: fmtUSDCompact(summary.cifTotal), title: fmtUSD(summary.cifTotal) },
     { label: 'Moléculas distintas', value: fmtInt(summary.moleculas) },
     { label: 'Importadores distintos', value: fmtInt(summary.importadores) },
     { label: 'Rango cargado', value: `${summary.desde ?? '—'} a ${summary.hasta ?? '—'}` },
   ];
   document.getElementById('statRow').innerHTML = tiles
-    .map((t) => `<div class="stat-tile"><div class="label">${t.label}</div><div class="value">${t.value}</div></div>`)
+    .map(
+      (t) =>
+        `<div class="stat-tile"><div class="label">${t.label}</div><div class="value"${t.title ? ` title="${t.title}"` : ''}>${t.value}</div></div>`
+    )
     .join('');
 }
 
@@ -274,7 +287,11 @@ document.getElementById('applyFilter').addEventListener('click', () => {
 document.getElementById('clearFilter').addEventListener('click', () => {
   document.getElementById('fromInput').value = '';
   document.getElementById('toInput').value = '';
-  state = { from: '', to: '' };
+  state = { from: '', to: '', focus: state.focus };
+  loadAll();
+});
+document.getElementById('focusToggle').addEventListener('change', (e) => {
+  state.focus = e.target.checked;
   loadAll();
 });
 document.getElementById('backToMoleculas').addEventListener('click', resetMoleculaView);

@@ -2,26 +2,24 @@
 // confianza, ordenadas por cuántas filas afectan (para priorizar las que más pesan).
 // Cada línea trae el hash a usar como clave en product-overrides.json.
 // Uso: node review-products.mjs [N]   (N = cuántas descripciones distintas mostrar, default 30)
-import { config } from './config.js';
-import { openDb } from './db.js';
+import { getPool, closePool } from './db.js';
 import { hashDescripcion } from './product-extractor.js';
 
 const TABLE = 'importaciones';
 const DESC_COLUMN = 'Desc Completa De Producto';
 const limit = Number(process.argv[2]) || 30;
 
-function main() {
-  const db = openDb(config.dbFile);
-  const rows = db
-    .prepare(
-      `SELECT "${DESC_COLUMN}" AS descripcion, molecula, marca, COUNT(*) as n
-       FROM ${TABLE}
-       WHERE extraction_confidence = 'low' AND "${DESC_COLUMN}" IS NOT NULL
-       GROUP BY "${DESC_COLUMN}"
-       ORDER BY n DESC
-       LIMIT ?`
-    )
-    .all(limit);
+async function main() {
+  const pool = getPool();
+  const { rows } = await pool.query(
+    `SELECT "${DESC_COLUMN}" AS descripcion, molecula, marca, COUNT(*) as n
+     FROM ${TABLE}
+     WHERE extraction_confidence = 'low' AND "${DESC_COLUMN}" IS NOT NULL
+     GROUP BY "${DESC_COLUMN}", molecula, marca
+     ORDER BY n DESC
+     LIMIT $1`,
+    [limit]
+  );
 
   console.log(`Top ${rows.length} descripciones de baja confianza (por filas afectadas):\n`);
   for (const row of rows) {
@@ -35,7 +33,10 @@ function main() {
   console.log(`  "<hash>": { "molecula": "...", "marca": "..." }`);
   console.log('Luego corre "node backfill-products.mjs" de nuevo para aplicar los cambios.');
 
-  db.close();
+  await closePool();
 }
 
-main();
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

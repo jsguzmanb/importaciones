@@ -1,0 +1,10 @@
+{
+  "_comment": "Moléculas de interés particular para la empresa. Cada entrada es una palabra clave (sin distinguir mayúsculas/acentos) que se busca como substring dentro del campo 'molecula' -- así se agrupan variantes de dosis/forma (p.ej. 'IMIGLUCERASA (400 U EXTRAIBLES)', 'IMIGLUCERASA (DOSIS EXTRAIBLE 400U)') bajo una sola palabra clave. El dashboard usa esta lista para el toggle 'Solo moléculas de interés'.",
+  "keywords": [
+    "ECULIZUMAB",
+    "ANTITRIPSINA",
+    "IMIGLUCERASA",
+    "IDURSULFASA",
+    "ELEXACAFTOR"
+  ]
+}

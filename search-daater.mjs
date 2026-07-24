@@ -4,7 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { config } from './config.js';
-import { openDb, getLatestMonth, replaceMonthData } from './db.js';
+import { getLatestMonth, replaceMonthData, closePool } from './db.js';
 import { parseWorkbook, groupRowsByMonth } from './xlsx-parser.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -223,8 +223,8 @@ function monthRange(anioMes) {
 // "default" que Daater deja al abrir la base no trae resultados para estas partidas.
 // En corridas siguientes solo se piden el último mes ya cargado (por si Daater lo completó)
 // y el mes siguiente.
-function computeMonthsToFetch(db) {
-  const latestMonth = getLatestMonth(db);
+async function computeMonthsToFetch() {
+  const latestMonth = await getLatestMonth();
   if (!latestMonth) return config.backfillRange;
 
   const nextMonth = addMonth(latestMonth);
@@ -264,7 +264,6 @@ async function setDateRange(page, fromDate, toDate) {
       .normalize('NFD')
       .replace(/\p{Diacritic}/gu, '');
 
-  const db = openDb(path.join(__dirname, config.dbFile));
   const results = [];
 
   for (let i = 0; i < baseCount; i++) {
@@ -291,7 +290,7 @@ async function setDateRange(page, fromDate, toDate) {
       await ensureShowDetail(page);
     }
 
-    const range = computeMonthsToFetch(db);
+    const range = await computeMonthsToFetch();
     console.log(`  Rango de fechas: ${range.fromDate} a ${range.toDate}`);
     await setDateRange(page, range.fromDate, range.toDate);
 
@@ -314,7 +313,7 @@ async function setDateRange(page, fromDate, toDate) {
     const rows = parseWorkbook(filePath);
     const byMonth = groupRowsByMonth(rows);
     for (const [anioMes, monthRows] of byMonth) {
-      replaceMonthData(db, anioMes, monthRows);
+      await replaceMonthData(anioMes, monthRows);
       console.log(`  Base maestra: mes ${anioMes} actualizado (${monthRows.length} filas).`);
     }
 
@@ -322,7 +321,7 @@ async function setDateRange(page, fromDate, toDate) {
   }
 
   await browser.close();
-  db.close();
+  await closePool();
 
   console.log('\nResumen:');
   for (const r of results) {

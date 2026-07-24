@@ -15,14 +15,8 @@ export const config = {
 
   outputDir: './output',
 
-  // Base de datos SQLite acumulativa. Si está vacía, la primera corrida fija el rango
-  // backfillRange (abajo); en corridas siguientes solo se piden el último mes ya cargado
-  // (por si quedó parcial) y el mes siguiente.
-  // DB_FILE permite apuntar a otra ruta (p.ej. el volumen montado en Fly.io) sin tocar
-  // este archivo por ambiente.
-  dbFile: process.env.DB_FILE || './daater.db',
-
-  // Rango de fechas a usar SOLO en la primera corrida (base maestra vacía). El rango
+  // Rango de fechas a usar SOLO en la primera corrida (base maestra vacía, en Supabase/
+  // Postgres). El rango
   // "default" que Daater deja al abrir la base NO trae resultados para estas partidas
   // (confirmado: da 0 filas); hay que fijarlo explícitamente al rango completo disponible.
   backfillRange: { fromDate: '2025-01-01', toDate: '2026-04-30' },
