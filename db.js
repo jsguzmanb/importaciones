@@ -87,7 +87,14 @@ export function getPool() {
     if (!connectionString) {
       throw new Error('Falta DATABASE_URL. Copia .env.example a .env.local y completa la connection string de Supabase/Postgres.');
     }
-    pool = new Pool({ connectionString, ssl: { rejectUnauthorized: false } });
+    // max bajo (no el default de 10): en Vercel cada invocación de función serverless
+    // puede crear su propia instancia de este módulo con su propio Pool, así que varias
+    // invocaciones concurrentes multiplican conexiones -- con el default de 10 unas
+    // pocas invocaciones ya superan el límite del pooler de Supabase en modo sesión (15
+    // clientes), como pasó con el error EMAXCONNSESSION. Cada request de este dashboard
+    // solo necesita 1-2 conexiones a la vez, así que un max bajo por instancia es
+    // suficiente y deja margen para que quepan varias instancias serverless a la vez.
+    pool = new Pool({ connectionString, ssl: { rejectUnauthorized: false }, max: 3 });
   }
   return pool;
 }
