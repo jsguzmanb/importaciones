@@ -7,3 +7,4 @@ daater.db-shm
 .claude/
 
 .vercel
+*.log
