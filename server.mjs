@@ -22,30 +22,45 @@ const PORT = process.env.PORT || 4321;
 const normalize = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase();
 const CACHE_TTL_MS = 5 * 60 * 1000;
 let focusCache = { data: null, expiresAt: 0 };
+// Varios endpoints piden getFocusMoleculas() en paralelo en cada carga del dashboard
+// (?focus=1 dispara 6 requests simultáneas); sin esto, cuando el caché está vacío o
+// venció, las 6 verían focusCache.data como null a la vez y cada una dispararía su
+// propia query -- multiplicando conexiones al pool justo cuando ya hay presión sobre
+// él. Compartir la misma promesa en vuelo hace que solo la primera consulte la DB.
+let focusPromise = null;
 
 async function getFocusMoleculas() {
   if (focusCache.data && Date.now() < focusCache.expiresAt) return focusCache.data;
+  if (focusPromise) return focusPromise;
 
-  let raw;
+  focusPromise = (async () => {
+    let raw;
+    try {
+      raw = JSON.parse(fs.readFileSync(path.join(__dirname, 'focus-molecules.json'), 'utf8'));
+    } catch {
+      raw = { keywords: [] };
+    }
+    const keywords = (raw.keywords || []).map(normalize);
+
+    const pool = getPool();
+    const { rows } = await pool.query(`SELECT DISTINCT molecula FROM ${TABLE} WHERE molecula IS NOT NULL`);
+    const matched = rows
+      .map((r) => r.molecula)
+      .filter((m) => {
+        const n = normalize(m);
+        return keywords.some((k) => n.includes(k));
+      });
+
+    const data = { keywords: raw.keywords || [], moleculas: matched };
+    focusCache = { data, expiresAt: Date.now() + CACHE_TTL_MS };
+    return data;
+  })();
+
   try {
-    raw = JSON.parse(fs.readFileSync(path.join(__dirname, 'focus-molecules.json'), 'utf8'));
-  } catch {
-    raw = { keywords: [] };
+    return await focusPromise;
+  } finally {
+    focusPromise = null;
   }
-  const keywords = (raw.keywords || []).map(normalize);
-
-  const pool = getPool();
-  const { rows } = await pool.query(`SELECT DISTINCT molecula FROM ${TABLE} WHERE molecula IS NOT NULL`);
-  const matched = rows
-    .map((r) => r.molecula)
-    .filter((m) => {
-      const n = normalize(m);
-      return keywords.some((k) => n.includes(k));
-    });
-
-  const data = { keywords: raw.keywords || [], moleculas: matched };
-  focusCache = { data, expiresAt: Date.now() + CACHE_TTL_MS };
-  return data;
 }
 
 // Los valores numéricos vienen como TEXT desde el Excel de Daater, a veces con coma
