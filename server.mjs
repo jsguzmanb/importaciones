@@ -20,6 +20,10 @@ const PORT = process.env.PORT || 4321;
 // no la misma instancia -- un caché con expiración evita tanto recalcular en cada
 // request como quedarse con una lista desactualizada indefinidamente.
 const normalize = (s) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase();
+// Equivalente SQL de normalize() de arriba, sin depender de la extensión unaccent de
+// Postgres (no siempre habilitable en el proyecto de Supabase) -- solo cubre los
+// acentos/diéresis que de hecho aparecen en nombres de molécula en español.
+const UNACCENT_SQL = `TRANSLATE(UPPER($COL$), 'ÁÉÍÓÚÀÈÌÒÙÄËÏÖÜÑ', 'AEIOUAEIOUAEIOUN')`;
 const CACHE_TTL_MS = 5 * 60 * 1000;
 let focusCache = { data: null, expiresAt: 0 };
 // Varios endpoints piden getFocusMoleculas() en paralelo en cada carga del dashboard
@@ -40,18 +44,35 @@ async function getFocusMoleculas() {
     } catch {
       raw = { keywords: [] };
     }
-    const keywords = (raw.keywords || []).map(normalize);
+    const entries = (raw.keywords || []).map((k) => ({
+      keyword: normalize(k.keyword),
+      condicion: k.condicion,
+    }));
 
     const pool = getPool();
     const { rows } = await pool.query(`SELECT DISTINCT molecula FROM ${TABLE} WHERE molecula IS NOT NULL`);
-    const matched = rows
-      .map((r) => r.molecula)
-      .filter((m) => {
-        const n = normalize(m);
-        return keywords.some((k) => n.includes(k));
-      });
+    const moleculas = [];
+    // Mapa molecula -> condición, para el primer nivel de desglose (Condición ->
+    // Molécula -> Marca) del dashboard. Varias keywords pueden compartir condición (ej.
+    // Estiripentol y Fenfluramina, ambas Dravet), así que se agrupa por condicion, no
+    // por keyword individual. Si una misma molécula matchea más de una keyword, se
+    // queda con la primera condición encontrada (orden de focus-molecules.json).
+    const condicionPorMolecula = {};
+    for (const r of rows) {
+      const m = r.molecula;
+      const n = normalize(m);
+      const entry = entries.find((e) => n.includes(e.keyword));
+      if (entry) {
+        moleculas.push(m);
+        condicionPorMolecula[m] = entry.condicion;
+      }
+    }
 
-    const data = { keywords: raw.keywords || [], moleculas: matched };
+    const data = {
+      keywords: (raw.keywords || []).map((k) => k.keyword),
+      moleculas,
+      condicionPorMolecula,
+    };
     focusCache = { data, expiresAt: Date.now() + CACHE_TTL_MS };
     return data;
   })();
@@ -71,8 +92,11 @@ const CANTIDAD = `REPLACE("Cantidad", ',', '.')::NUMERIC`;
 
 // Arma la cláusula WHERE + params ($1, $2, ...) para los filtros de fecha y foco.
 // focusMoleculas ya viene resuelto (ver getFocusMoleculas) para no hacer la consulta
-// de moléculas de interés dentro de cada endpoint.
-function dateFilter(req, focusMoleculas) {
+// de moléculas de interés dentro de cada endpoint. applyFocus=false hace que se ignore
+// ?focus= por completo (usado por /api/by-condicion y /api/condicion/:nombre, que ya
+// filtran explícitamente a un subconjunto de moléculas propio y no deben añadir además
+// la cláusula `molecula = ANY(...)` genérica de foco encima).
+function dateFilter(req, focusMoleculas, applyFocus = true) {
   const { from, to } = req.query;
   const clauses = [];
   const params = [];
@@ -84,7 +108,7 @@ function dateFilter(req, focusMoleculas) {
     params.push(to);
     clauses.push(`anio_mes <= $${params.length}`);
   }
-  if (req.query.focus === '1') {
+  if (applyFocus && req.query.focus === '1') {
     if (focusMoleculas.moleculas.length === 0) {
       // Ninguna molécula coincide: forzar un resultado vacío en vez de devolver todo.
       clauses.push('1 = 0');
@@ -123,19 +147,103 @@ app.get('/api/summary', async (req, res, next) => {
   }
 });
 
+// Primer nivel de desglose cuando el toggle de foco está activo: agrupa por la
+// condición/enfermedad asociada a cada molécula de interés (focus-molecules.json),
+// no por molecula misma. Ignora ?focus= -- esta vista solo tiene sentido para el
+// conjunto de moléculas de interés, así que siempre filtra a ese conjunto.
+app.get('/api/by-condicion', async (req, res, next) => {
+  try {
+    const pool = getPool();
+    const focusMoleculas = await getFocusMoleculas();
+    const { where, params } = dateFilter(req, focusMoleculas, false);
+    const extra = where ? 'AND' : 'WHERE';
+
+    if (focusMoleculas.moleculas.length === 0) {
+      res.json([]);
+      return;
+    }
+    params.push(focusMoleculas.moleculas);
+    const { rows } = await pool.query(
+      `SELECT molecula,
+              COUNT(*) as filas, SUM(${FOB}) as fob, SUM(${CIF}) as cif
+       FROM ${TABLE} ${where} ${extra} molecula = ANY($${params.length})
+       GROUP BY molecula`,
+      params
+    );
+
+    // Agregación por condición se hace en JS, no en SQL, porque el mapeo
+    // molecula -> condicion vive en focus-molecules.json (JS), no en una columna de
+    // la tabla -- no hay forma de hacer este GROUP BY directamente en Postgres.
+    const porCondicion = new Map();
+    for (const r of rows) {
+      const condicion = focusMoleculas.condicionPorMolecula[r.molecula] ?? 'Sin condición';
+      const acc = porCondicion.get(condicion) ?? { condicion, filas: 0, fob: 0, cif: 0 };
+      acc.filas += Number(r.filas);
+      acc.fob += Number(r.fob ?? 0);
+      acc.cif += Number(r.cif ?? 0);
+      porCondicion.set(condicion, acc);
+    }
+    const result = [...porCondicion.values()].sort((a, b) => b.fob - a.fob);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Segundo nivel: desglose por molécula dentro de una condición puntual (click en una
+// barra de /api/by-condicion). Reutiliza el mismo mapeo condicionPorMolecula.
+app.get('/api/condicion/:nombre', async (req, res, next) => {
+  try {
+    const pool = getPool();
+    const focusMoleculas = await getFocusMoleculas();
+    const { where, params } = dateFilter(req, focusMoleculas, false);
+    const extra = where ? 'AND' : 'WHERE';
+
+    const moleculasDeCondicion = focusMoleculas.moleculas.filter(
+      (m) => (focusMoleculas.condicionPorMolecula[m] ?? 'Sin condición') === req.params.nombre
+    );
+    if (moleculasDeCondicion.length === 0) {
+      res.json([]);
+      return;
+    }
+    params.push(moleculasDeCondicion);
+    const { rows } = await pool.query(
+      `SELECT molecula,
+              COUNT(*) as filas, SUM(${FOB}) as fob, SUM(${CIF}) as cif, SUM(${CANTIDAD}) as cantidad
+       FROM ${TABLE} ${where} ${extra} molecula = ANY($${params.length})
+       GROUP BY molecula
+       ORDER BY fob DESC`,
+      params
+    );
+    res.json(rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
 app.get('/api/by-molecula', async (req, res, next) => {
   try {
     const pool = getPool();
     const focusMoleculas = await getFocusMoleculas();
     const { where, params } = dateFilter(req, focusMoleculas);
     const extra = where ? 'AND' : 'WHERE';
+    const clauses = ['molecula IS NOT NULL'];
+    // Búsqueda libre por nombre: substring insensible a mayúsculas/acentos, igual que
+    // el matching de focus-molecules.json (normalize + unaccent), en vez de exigir
+    // coincidencia exacta -- el usuario puede escribir "eculizumab" o "eculizu" y
+    // encontrar variantes de dosis/forma como "ECULIZUMAB (400MG)".
+    const q = (req.query.q || '').trim();
+    if (q) {
+      params.push(`%${normalize(q)}%`);
+      clauses.push(`${UNACCENT_SQL.replace('$COL$', 'molecula')} LIKE $${params.length}`);
+    }
     const { rows } = await pool.query(
       `SELECT COALESCE(molecula, 'Sin clasificar') as molecula,
               COUNT(*) as filas, SUM(${FOB}) as fob, SUM(${CIF}) as cif, SUM(${CANTIDAD}) as cantidad
-       FROM ${TABLE} ${where} ${extra} molecula IS NOT NULL
+       FROM ${TABLE} ${where} ${extra} ${clauses.join(' AND ')}
        GROUP BY molecula
        ORDER BY fob DESC
-       LIMIT 25`,
+       ${q ? '' : 'LIMIT 25'}`,
       params
     );
     res.json(rows);

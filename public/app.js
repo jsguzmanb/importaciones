@@ -31,7 +31,7 @@ function chartDefaults() {
   return { grid, muted, text };
 }
 
-let state = { from: '', to: '', focus: true };
+let state = { from: '', to: '', focus: true, q: '' };
 const charts = {};
 const lastData = {};
 
@@ -40,6 +40,16 @@ function qs(params) {
   if (params.from) p.set('from', params.from);
   if (params.to) p.set('to', params.to);
   if (params.focus) p.set('focus', '1');
+  const s = p.toString();
+  return s ? `?${s}` : '';
+}
+
+function moleculaQs(params) {
+  const p = new URLSearchParams();
+  if (params.from) p.set('from', params.from);
+  if (params.to) p.set('to', params.to);
+  if (params.focus) p.set('focus', '1');
+  if (params.q) p.set('q', params.q);
   const s = p.toString();
   return s ? `?${s}` : '';
 }
@@ -74,8 +84,14 @@ function destroyChart(id) {
   }
 }
 
-function renderMoleculaChart(rows) {
-  lastData.molecula = rows;
+// Estado del drill-down de 3 niveles Condición -> Molécula -> Marca (solo el primer
+// nivel aplica cuando el toggle de foco está activo; sin foco, se comporta como antes:
+// arranca directo en "molecula", top 25 o resultados de búsqueda libre).
+// level: 'condicion' | 'molecula' | 'marca'. path guarda el nombre elegido en cada
+// nivel superior, para poder reconstruir el breadcrumb y volver atrás.
+let moleculaView = { level: 'molecula', path: {} };
+
+function renderMoleculaBarChart(rows, labelKey, onBarClick) {
   destroyChart('moleculaChart');
   const { grid } = chartDefaults();
   const colors = seriesColors();
@@ -83,7 +99,7 @@ function renderMoleculaChart(rows) {
   charts.moleculaChart = new Chart(ctx, {
     type: 'bar',
     data: {
-      labels: rows.map((r) => r.molecula),
+      labels: rows.map((r) => r[labelKey]),
       datasets: [
         {
           label: 'Valor FOB (USD)',
@@ -98,11 +114,12 @@ function renderMoleculaChart(rows) {
       indexAxis: 'y',
       responsive: true,
       maintainAspectRatio: false,
-      onClick: (evt, elements) => {
-        if (!elements.length) return;
-        const row = rows[elements[0].index];
-        if (row.molecula !== 'Sin clasificar') drillIntoMolecula(row.molecula);
-      },
+      onClick: onBarClick
+        ? (evt, elements) => {
+            if (!elements.length) return;
+            onBarClick(rows[elements[0].index]);
+          }
+        : undefined,
       plugins: {
         legend: { display: false },
         tooltip: {
@@ -117,54 +134,89 @@ function renderMoleculaChart(rows) {
       },
     },
   });
+}
+
+function renderMoleculaBreadcrumb() {
+  const el = document.getElementById('moleculaBreadcrumb');
+  const parts = [];
+  if (moleculaView.level === 'condicion') {
+    el.style.display = 'none';
+    return;
+  }
+  if (state.focus) parts.push({ label: 'Condiciones', action: () => goToLevel('condicion') });
+  if (moleculaView.level === 'marca') {
+    parts.push({ label: moleculaView.path.condicion ? moleculaView.path.condicion : 'Moléculas', action: () => goToLevel('molecula') });
+  }
+  if (!parts.length) {
+    el.style.display = 'none';
+    return;
+  }
+  el.style.display = 'block';
+  el.innerHTML = parts.map((p, i) => `<button data-idx="${i}">&larr; Volver a ${p.label}</button>`).join(' · ');
+  [...el.querySelectorAll('button')].forEach((btn, i) => btn.addEventListener('click', parts[i].action));
+}
+
+function goToLevel(level) {
+  if (level === 'condicion') {
+    moleculaView = { level: 'condicion', path: {} };
+    loadCondicionChart();
+  } else if (level === 'molecula') {
+    const condicion = moleculaView.path.condicion;
+    moleculaView = { level: 'molecula', path: { condicion } };
+    if (condicion) loadMoleculasOfCondicion(condicion);
+    else loadMoleculaChart();
+  }
+}
+
+async function loadCondicionChart() {
+  moleculaView = { level: 'condicion', path: {} };
+  const rows = await fetchJSON(`/api/by-condicion${qs(state)}`);
+  document.getElementById('moleculaTitle').textContent = 'Importaciones por condición';
+  document.getElementById('moleculaSubtitle').textContent = 'Click en una barra para ver el desglose por molécula.';
+  renderMoleculaBreadcrumb();
+  renderMoleculaBarChart(rows, 'condicion', (row) => loadMoleculasOfCondicion(row.condicion));
+  renderTable('moleculaTable', ['Condición', 'Filas', 'FOB', 'CIF'], rows.map((r) => [r.condicion, fmtInt(r.filas), fmtUSD(r.fob), fmtUSD(r.cif)]));
+}
+
+async function loadMoleculasOfCondicion(condicion) {
+  moleculaView = { level: 'molecula', path: { condicion } };
+  const rows = await fetchJSON(`/api/condicion/${encodeURIComponent(condicion)}${qs(state)}`);
+  document.getElementById('moleculaTitle').textContent = `${condicion} — desglose por molécula`;
+  document.getElementById('moleculaSubtitle').textContent = 'Click en una barra para ver el desglose por marca.';
+  renderMoleculaBreadcrumb();
+  renderMoleculaBarChart(rows, 'molecula', (row) => drillIntoMolecula(row.molecula, condicion));
   renderTable('moleculaTable', ['Molécula', 'Filas', 'FOB', 'CIF'], rows.map((r) => [r.molecula, fmtInt(r.filas), fmtUSD(r.fob), fmtUSD(r.cif)]));
 }
 
-async function drillIntoMolecula(nombre) {
+async function drillIntoMolecula(nombre, condicion) {
+  moleculaView = { level: 'marca', path: { condicion, molecula: nombre } };
   const rows = await fetchJSON(`/api/molecula/${encodeURIComponent(nombre)}${qs(state)}`);
-  lastData.molecula = rows;
-  destroyChart('moleculaChart');
-  const { grid } = chartDefaults();
-  const colors = seriesColors();
   document.getElementById('moleculaTitle').textContent = `${nombre} — desglose por marca`;
-  document.getElementById('moleculaBreadcrumb').style.display = 'block';
-  const ctx = document.getElementById('moleculaChart');
-  charts.moleculaChart = new Chart(ctx, {
-    type: 'bar',
-    data: {
-      labels: rows.map((r) => r.marca),
-      datasets: [
-        {
-          label: 'Valor FOB (USD)',
-          data: rows.map((r) => r.fob),
-          backgroundColor: rows.map((_, i) => colors[i % colors.length]),
-          borderRadius: 4,
-          maxBarThickness: 22,
-        },
-      ],
-    },
-    options: {
-      indexAxis: 'y',
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: { callbacks: { label: (ctx) => `FOB: ${fmtUSD(ctx.raw)} · ${fmtInt(rows[ctx.dataIndex].filas)} envíos` } },
-      },
-      scales: {
-        x: { grid: { color: grid }, ticks: { callback: (v) => fmtUSD(v) } },
-        y: { grid: { display: false }, ticks: { autoSkip: false } },
-      },
-    },
-  });
+  document.getElementById('moleculaSubtitle').textContent = '';
+  renderMoleculaBreadcrumb();
+  renderMoleculaBarChart(rows, 'marca');
   renderTable('moleculaTable', ['Marca', 'Filas', 'FOB', 'CIF'], rows.map((r) => [r.marca, fmtInt(r.filas), fmtUSD(r.fob), fmtUSD(r.cif)]));
 }
 
-async function resetMoleculaView() {
+// Punto de entrada del bloque de moléculas: con foco activo y sin búsqueda de texto,
+// arranca en el nivel de condición (primer nivel de la jerarquía); si hay búsqueda
+// libre o el foco está apagado, arranca directo en molécula (comportamiento previo).
+async function loadMoleculaChart() {
+  if (state.focus && !state.q) {
+    await loadCondicionChart();
+    return;
+  }
+  moleculaView = { level: 'molecula', path: {} };
+  const rows = await fetchJSON(`/api/by-molecula${moleculaQs(state)}`);
   document.getElementById('moleculaTitle').textContent = 'Importaciones por molécula (principio activo)';
-  document.getElementById('moleculaBreadcrumb').style.display = 'none';
-  const rows = await fetchJSON(`/api/by-molecula${qs(state)}`);
-  renderMoleculaChart(rows);
+  document.getElementById('moleculaSubtitle').textContent = state.q
+    ? `Resultados para "${state.q}". Click en una barra para ver el desglose por marca.`
+    : 'Top 25 por valor FOB. Click en una barra para ver el desglose por marca.';
+  renderMoleculaBreadcrumb();
+  renderMoleculaBarChart(rows, 'molecula', (row) => {
+    if (row.molecula !== 'Sin clasificar') drillIntoMolecula(row.molecula);
+  });
+  renderTable('moleculaTable', ['Molécula', 'Filas', 'FOB', 'CIF'], rows.map((r) => [r.molecula, fmtInt(r.filas), fmtUSD(r.fob), fmtUSD(r.cif)]));
 }
 
 function renderMonthChart(rows) {
@@ -261,18 +313,15 @@ function renderTable(tableId, headers, rows) {
 }
 
 async function loadAll() {
-  const [summary, molecula, month, tariff, country, importer] = await Promise.all([
+  const [summary, , month, tariff, country, importer] = await Promise.all([
     fetchJSON(`/api/summary${qs(state)}`),
-    fetchJSON(`/api/by-molecula${qs(state)}`),
+    loadMoleculaChart(),
     fetchJSON(`/api/by-month${qs(state)}`),
     fetchJSON(`/api/by-tariff${qs(state)}`),
     fetchJSON(`/api/by-country${qs(state)}`),
     fetchJSON(`/api/by-importer${qs(state)}`),
   ]);
   renderStatRow(summary);
-  document.getElementById('moleculaTitle').textContent = 'Importaciones por molécula (principio activo)';
-  document.getElementById('moleculaBreadcrumb').style.display = 'none';
-  renderMoleculaChart(molecula);
   renderMonthChart(month);
   renderSimpleBar('tariffChart', 'tariffTable', tariff, 'partida');
   renderSimpleBar('countryChart', 'countryTable', country, 'pais');
@@ -287,14 +336,20 @@ document.getElementById('applyFilter').addEventListener('click', () => {
 document.getElementById('clearFilter').addEventListener('click', () => {
   document.getElementById('fromInput').value = '';
   document.getElementById('toInput').value = '';
-  state = { from: '', to: '', focus: state.focus };
+  document.getElementById('moleculaSearch').value = '';
+  state = { from: '', to: '', focus: state.focus, q: '' };
   loadAll();
 });
 document.getElementById('focusToggle').addEventListener('change', (e) => {
   state.focus = e.target.checked;
   loadAll();
 });
-document.getElementById('backToMoleculas').addEventListener('click', resetMoleculaView);
+let moleculaSearchTimer = null;
+document.getElementById('moleculaSearch').addEventListener('input', (e) => {
+  state.q = e.target.value.trim();
+  clearTimeout(moleculaSearchTimer);
+  moleculaSearchTimer = setTimeout(loadMoleculaChart, 300);
+});
 
 document.getElementById('secondaryTabs').addEventListener('click', (e) => {
   const btn = e.target.closest('button[data-tab]');

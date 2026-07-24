@@ -1,10 +1,28 @@
 {
-  "_comment": "Moléculas de interés particular para la empresa. Cada entrada es una palabra clave (sin distinguir mayúsculas/acentos) que se busca como substring dentro del campo 'molecula' -- así se agrupan variantes de dosis/forma (p.ej. 'IMIGLUCERASA (400 U EXTRAIBLES)', 'IMIGLUCERASA (DOSIS EXTRAIBLE 400U)') bajo una sola palabra clave. El dashboard usa esta lista para el toggle 'Solo moléculas de interés'.",
+  "_comment": "Moléculas de interés particular para la empresa. Cada entrada es una palabra clave (sin distinguir mayúsculas/acentos) que se busca como substring dentro del campo 'molecula' -- así se agrupan variantes de dosis/forma (p.ej. 'IMIGLUCERASA (400 U EXTRAIBLES)', 'IMIGLUCERASA (DOSIS EXTRAIBLE 400U)') bajo una sola palabra clave. El dashboard usa esta lista para el toggle 'Solo moléculas de interés'. 'condicion' es la enfermedad/indicación asociada a cada palabra clave -- varias moléculas pueden compartir la misma condición (ej. Estiripentol y Fenfluramina, ambas Dravet), y el dashboard la usa como primer nivel de desglose (Condición -> Molécula -> Marca) cuando el toggle de foco está activo.",
   "keywords": [
-    "ECULIZUMAB",
-    "ANTITRIPSINA",
-    "IMIGLUCERASA",
-    "IDURSULFASA",
-    "ELEXACAFTOR"
+    { "keyword": "ECULIZUMAB", "condicion": "HPN" },
+    { "keyword": "ANTITRIPSINA", "condicion": "AAT" },
+    { "keyword": "IMIGLUCERASA", "condicion": "Gaucher" },
+    { "keyword": "IDURSULFASA", "condicion": "Hunter" },
+    { "keyword": "ELEXACAFTOR", "condicion": "FQ" },
+    { "keyword": "FENFLURAMINA", "condicion": "Dravet" },
+    { "keyword": "ESTIRIPENTOL", "condicion": "Dravet" },
+    { "keyword": "METIRAPONA", "condicion": "Cushing" },
+    { "keyword": "ACIDO COLICO", "condicion": "DSAB" },
+    { "keyword": "PEGCETACOPLAN", "condicion": "HPN" },
+    { "keyword": "VOSORITIDA", "condicion": "Acondroplasia" },
+    { "keyword": "IPTACOPAN", "condicion": "HPN" },
+    { "keyword": "OSILODROSTAT", "condicion": "Cushing" },
+    { "keyword": "PABINAFUSP", "condicion": "Hunter" },
+    { "keyword": "ETEPLIRSEN", "condicion": "DMD" },
+    { "keyword": "GOLODIRSEN", "condicion": "DMD" },
+    { "keyword": "CASIMERSEN", "condicion": "DMD" },
+    { "keyword": "ATALURENO", "condicion": "DMD" },
+    { "keyword": "TRIENTINA CLORHIDRATO", "condicion": "Wilson" },
+    { "keyword": "TRIENTINA", "condicion": "Wilson" },
+    { "keyword": "MITOTANO", "condicion": "ACC" },
+    { "keyword": "MIFAMURTIDA", "condicion": "Osteosarcoma" },
+    { "keyword": "IVACAFTOR", "condicion": "FQ" }
   ]
 }

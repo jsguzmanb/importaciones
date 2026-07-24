@@ -287,12 +287,14 @@
     <div class="card-head">
       <div>
         <h2 id="moleculaTitle">Importaciones por molécula (principio activo)</h2>
-        <p class="subtitle">Top 25 por valor FOB. Click en una barra para ver el desglose por marca.</p>
+        <p class="subtitle" id="moleculaSubtitle">Top 25 por valor FOB. Click en una barra para ver el desglose por marca.</p>
       </div>
       <button class="table-toggle" data-toggle="molecula">Ver tabla</button>
     </div>
-    <div class="breadcrumb" id="moleculaBreadcrumb" style="display:none">
-      <button id="backToMoleculas">&larr; Volver a moléculas</button>
+    <div class="breadcrumb" id="moleculaBreadcrumb" style="display:none"></div>
+    <div style="margin-bottom:12px">
+      <input type="search" id="moleculaSearch" placeholder="Buscar molécula (ej. eculizumab)..."
+        style="width:100%;font:inherit;font-size:0.85rem;border:1px solid var(--border);border-radius:6px;padding:6px 10px;background:var(--surface-1);color:var(--text-primary)" />
     </div>
     <div class="chart-wrap" style="height:420px">
       <canvas id="moleculaChart"></canvas>

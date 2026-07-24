@@ -155,8 +155,13 @@ function extractField(text, labels, boundaryLabels) {
     end = Math.min(end, 200);
 
     let value = rest.slice(0, end).trim();
-    // Recorta separadores/puntuación colgante al final (comas, puntos sueltos).
-    value = value.replace(/[.,;:\s]+$/, '').trim();
+    // Recorta separadores/puntuación colgante al final (comas, puntos, dos puntos,
+    // guiones o signos de interrogación sueltos -- ej. "Nombre del principio activo:
+    // Atalureno - Concentración: 250 mg" usa "-" en vez de coma/punto como separador
+    // antes del siguiente campo, y "PRINCIPIO ACTIVO: CASIMERSEN? 100 MG/2ML..." trae un
+    // "?" mecanografiado pegado al nombre -- sin incluir estos caracteres aquí el value
+    // queda "ATALURENO -"/"CASIMERSEN?" en vez del nombre limpio).
+    value = value.replace(/[.,;:\-?\s]+$/, '').trim();
     if (value) return { value, label };
   }
   return null;
@@ -184,6 +189,14 @@ function cleanMolecula(raw) {
   // "CADA X ML/MG CONTIENE" al inicio (a veces sin llegar a nombrar la molécula
   // porque la dosis/unidad no calzó con el patrón esperado más abajo).
   value = value.replace(/^CADA\b.*?\bCONTIENE[;:]?\s*/i, '');
+
+  // Tras el strip anterior, el residuo puede ser "<dosis> DE <nombre>" (ej. "54 MG DE
+  // PEGCETACOPLAN") -- la dosis quedó ANTES del nombre, al revés del patrón habitual
+  // "<nombre> <dosis>" que el corte de dosis final más abajo espera. Sin este caso, ese
+  // corte (greedy desde el primer número) se comería la cadena completa dejando "" y el
+  // resultado caería al fallback del texto crudo sin limpiar.
+  const doseThenNameMatch = /^[\d.,]+\s*(?:MG|G|ML|UI|MCG|%)\s+DE\s+(.+)$/i.exec(value);
+  if (doseThenNameMatch) value = doseThenNameMatch[1];
 
   // "MOLECULA (EQUIVALENTE A <dosis>)" -> es una nota de equivalencia de dosis, no de
   // sal; nos quedamos con el texto ANTES del paréntesis (el nombre real).
@@ -288,7 +301,11 @@ function cleanMolecula(raw) {
   value = value.replace(/[\d.,]+\s*(MG|G|ML|UI|MCG|%)\b.*$/i, '');
 
   value = value.replace(/\s+/g, ' ').trim();
-  value = value.replace(/[.,;:\s]+$/, '').trim();
+  // Incluye "?" en el recorte final junto con la puntuación habitual -- visto en textos
+  // con un signo de interrogación mecanografiado pegado al nombre antes de la dosis
+  // (ej. "PRINCIPIO ACTIVO: CASIMERSEN? 100 MG/2ML..."), que sin esto sobrevive al
+  // corte de dosis de arriba y deja "CASIMERSEN?" en vez de "CASIMERSEN".
+  value = value.replace(/[.,;:?\s]+$/, '').trim();
   // Paréntesis huérfano de apertura (sin su cierre) dejado por el corte de dosis final
   // cuando el paréntesis solo envolvía la dosis (ej. "IVACAFTOR (150 mg)" -> "IVACAFTOR
   // (" tras cortar en el número): a diferencia de paréntesis balanceados que sí forman
@@ -296,7 +313,11 @@ function cleanMolecula(raw) {
   // final nunca es información válida del nombre.
   if (value.endsWith('(')) {
     value = value.slice(0, -1).trim();
-    value = value.replace(/[.,;:\s]+$/, '').trim();
+    // Incluye "?" en el recorte final junto con la puntuación habitual -- visto en textos
+  // con un signo de interrogación mecanografiado pegado al nombre antes de la dosis
+  // (ej. "PRINCIPIO ACTIVO: CASIMERSEN? 100 MG/2ML..."), que sin esto sobrevive al
+  // corte de dosis de arriba y deja "CASIMERSEN?" en vez de "CASIMERSEN".
+  value = value.replace(/[.,;:?\s]+$/, '').trim();
   }
   // Normaliza espacios sueltos alrededor del separador "/" en combinaciones
   // (ej. "ELEXACAFTOR/TEZACAFTOR/ IVACAFTOR" -> "ELEXACAFTOR/TEZACAFTOR/IVACAFTOR"):
@@ -324,6 +345,7 @@ function cleanMolecula(raw) {
 // una normalización genérica arriesgaría fusionar moléculas que sí son distintas.
 const MOLECULA_CANONICAL_MAP = new Map([
   ['EELEXACAFTOR/TEZACAFTOR/IVACAFTOR', 'ELEXACAFTOR/TEZACAFTOR/IVACAFTOR'],
+  ['PEGCETACOPLÁN', 'PEGCETACOPLAN'],
 ]);
 
 function canonicalizeMolecula(value) {
@@ -425,7 +447,20 @@ export function extractProduct(descripcion) {
     return { molecula: null, marca: null, confidence: 'low', rawMatch: null, vitalNoDisponible: false };
   }
 
-  const text = descripcion.trim();
+  // Algunos textos de Daater traen mojibake: el símbolo de acento agudo suelto U+00B4
+  // ("´", no un combinante Unicode) pegado tras la vocal en vez de la letra acentuada
+  // precompuesta, ej. "CONCENTRACIO´N" en vez de "CONCENTRACIÓN". Los literales de
+  // MOLECULA_LABELS/FIELD_BOUNDARY_LABELS usan la forma acentuada normal, así que sin
+  // reparar esto esos textos nunca matchean el límite de campo esperado y el value
+  // arrastra la frase siguiente completa (visto en VOSORITIDA: "CONCENTRACIO´N
+  // PRINCIPIO ACTIVO: CADA VIAL..." colándose dentro de molecula). normalize('NFC') se
+  // aplica después por si acaso el texto también trae combinantes Unicode reales
+  // (U+0301) en vez de este símbolo suelto.
+  const ACUTE_MOJIBAKE = { a: 'á', e: 'é', i: 'í', o: 'ó', u: 'ú', A: 'Á', E: 'É', I: 'Í', O: 'Ó', U: 'Ú' };
+  const text = descripcion
+    .trim()
+    .replace(/([aeiouAEIOU])´/g, (_, v) => ACUTE_MOJIBAKE[v])
+    .normalize('NFC');
   const vitalNoDisponible = isVitalNoDisponible(text);
 
   const molecula = extractMolecula(text);

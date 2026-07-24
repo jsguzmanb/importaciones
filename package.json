@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "postinstall": "playwright install chromium",
-    "search": "node search-daater.mjs",
-    "dashboard": "node server.mjs",
+    "search": "node --env-file=.env.local search-daater.mjs",
+    "dashboard": "node --env-file=.env.local server.mjs",
     "vendor-chart": "node -e \"require('fs').copyFileSync('node_modules/chart.js/dist/chart.umd.min.js', 'public/vendor/chart.js')\"",
     "deploy": "vercel deploy --prod"
   },
