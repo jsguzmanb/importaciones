@@ -353,7 +353,13 @@ function extractMarca(text) {
   }
 
   for (const label of PRODUCTO_LABELS) {
-    const labelPattern = new RegExp(`\\b${escapeRegExp(label)}\\s*[:_-]\\s*`, 'i');
+    // El separador de puntuación tras el label es opcional (ej. "PRODUCTO ELEXACAFTOR/...
+    // (TRIKAFTA®)" sin ":" tras "PRODUCTO"): probado contra el dataset completo, exigir
+    // solo espacio en vez de puntuación no genera falsos positivos porque el símbolo
+    // ®/™/© cercano (buscado más abajo) ya filtra la prosa genérica que también empieza
+    // con "PRODUCTO " (ej. "PRODUCTO ES EMPLEADO EN...", "PRODUCTO EN RS: ...") -- esas
+    // frases no tienen un símbolo de marca a corta distancia.
+    const labelPattern = new RegExp(`\\b${escapeRegExp(label)}\\s*[:_-]?\\s*`, 'i');
     const match = labelPattern.exec(text);
     if (!match) continue;
     const start = match.index + match[0].length;
