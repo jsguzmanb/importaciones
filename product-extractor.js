@@ -357,7 +357,12 @@ function extractMarca(text) {
     const match = labelPattern.exec(text);
     if (!match) continue;
     const start = match.index + match[0].length;
-    const rest = text.slice(start, start + 120);
+    // 300 chars: algunos textos de PRODUCTO enumeran la concentración combinada y luego
+    // repiten cada principio activo con su dosis individual antes de llegar al nombre de
+    // marca entre paréntesis (ej. Trikafta: "ELEXACAFTOR/TEZACAFTOR/IVACAFTOR (200/100/300
+    // MG) ELEXACAFTOR/TEZACAFTOR/IVACAFTOR 100/50/75 MG + IVACAFTOR 150 MG TABLETA
+    // (TRIKAFTA®)"), lo que empuja el símbolo más allá de una ventana de 120 caracteres.
+    const rest = text.slice(start, start + 300);
     // Busca una palabra (o frase corta) seguida de ®/™/©.
     const brandSymbolMatch = /([A-ZÁÉÍÓÚÑ0-9][A-ZÁÉÍÓÚÑ0-9\s\-]{1,40})[®™©]/.exec(rest);
     if (brandSymbolMatch) {
