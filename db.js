@@ -109,9 +109,13 @@ export async function ensureSchema() {
       anio_mes TEXT,
       molecula TEXT,
       marca TEXT,
-      extraction_confidence TEXT
+      extraction_confidence TEXT,
+      vital_no_disponible BOOLEAN
     )
   `);
+  // ADD COLUMN IF NOT EXISTS cubre bases creadas antes de que existiera esta columna
+  // (CREATE TABLE IF NOT EXISTS de arriba no las altera si la tabla ya existe).
+  await pool.query(`ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS vital_no_disponible BOOLEAN`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_${TABLE}_anio_mes ON ${TABLE} (anio_mes)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_${TABLE}_molecula ON ${TABLE} (molecula)`);
 }
@@ -150,7 +154,7 @@ export async function replaceMonthData(anioMes, rows) {
   const overrides = loadOverrides();
 
   const columns = COLUMNS.filter((c) => c in rows[0]);
-  const insertColumns = [...columns, 'anio_mes', 'molecula', 'marca', 'extraction_confidence'];
+  const insertColumns = [...columns, 'anio_mes', 'molecula', 'marca', 'extraction_confidence', 'vital_no_disponible'];
   const columnList = insertColumns.map(quoteIdent).join(', ');
 
   const allValues = rows.map((row) => {
@@ -161,6 +165,7 @@ export async function replaceMonthData(anioMes, rows) {
       extracted.molecula,
       extracted.marca,
       extracted.confidence,
+      extracted.vitalNoDisponible,
     ];
   });
 

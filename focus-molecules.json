@@ -23,6 +23,18 @@
     { "keyword": "TRIENTINA", "condicion": "Wilson" },
     { "keyword": "MITOTANO", "condicion": "ACC" },
     { "keyword": "MIFAMURTIDA", "condicion": "Osteosarcoma" },
-    { "keyword": "IVACAFTOR", "condicion": "FQ" }
+    { "keyword": "IVACAFTOR", "condicion": "FQ" },
+    { "keyword": "METRELEPTINA", "condicion": "Lipodistrofia" },
+    { "keyword": "VOLANESORSEN", "condicion": "FCS" },
+    { "keyword": "SELUMETINIB", "condicion": "NF1" },
+    { "keyword": "SEBELIPASA", "condicion": "LAL-D" },
+    { "keyword": "IDEBENONA", "condicion": "LOHN" },
+    { "keyword": "ACIDO QUENODEOXICOLICO", "condicion": "CTX" },
+    { "keyword": "GIVOSIRAN", "condicion": "PHA" },
+    { "keyword": "MARALIXIBAT", "condicion": "Alagille" },
+    { "keyword": "BETULINA", "condicion": "EB" },
+    { "keyword": "OLIPUDASA", "condicion": "RAP" },
+    { "keyword": "ELEPEGADEMASE", "condicion": "ADA-SCID" },
+    { "keyword": "CISTEAMINA", "condicion": "Cistinosis nefropática" }
   ]
 }

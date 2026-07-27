@@ -10,11 +10,6 @@ const fmtUSDCompact = (n) =>
         maximumFractionDigits: 1,
       }).format(n);
 
-const root = document.documentElement;
-const isDark = () =>
-  root.getAttribute('data-theme') === 'dark' ||
-  (root.getAttribute('data-theme') !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-
 function cssVar(name) {
   return getComputedStyle(document.querySelector('.viz-root')).getPropertyValue(name).trim();
 }
@@ -31,7 +26,7 @@ function chartDefaults() {
   return { grid, muted, text };
 }
 
-let state = { from: '', to: '', focus: true, q: '' };
+let state = { from: '', to: '', focus: true, q: '', vital: 'all' };
 const charts = {};
 const lastData = {};
 
@@ -40,6 +35,7 @@ function qs(params) {
   if (params.from) p.set('from', params.from);
   if (params.to) p.set('to', params.to);
   if (params.focus) p.set('focus', '1');
+  if (params.vital && params.vital !== 'all') p.set('vital', params.vital);
   const s = p.toString();
   return s ? `?${s}` : '';
 }
@@ -54,6 +50,7 @@ function monthQs(params) {
   if (params.from) p.set('from', params.from);
   if (params.to) p.set('to', params.to);
   if (params.focus) p.set('focus', '1');
+  if (params.vital && params.vital !== 'all') p.set('vital', params.vital);
   if (moleculaView.path.molecula) p.set('molecula', moleculaView.path.molecula);
   else if (moleculaView.path.condicion) p.set('condicion', moleculaView.path.condicion);
   else if (moleculaView.level === 'condicion') p.set('level', 'condicion');
@@ -66,6 +63,7 @@ function moleculaQs(params) {
   if (params.from) p.set('from', params.from);
   if (params.to) p.set('to', params.to);
   if (params.focus) p.set('focus', '1');
+  if (params.vital && params.vital !== 'all') p.set('vital', params.vital);
   if (params.q) p.set('q', params.q);
   const s = p.toString();
   return s ? `?${s}` : '';
@@ -85,6 +83,7 @@ function renderStatRow(summary) {
     { label: 'Moléculas distintas', value: fmtInt(summary.moleculas) },
     { label: 'Importadores distintos', value: fmtInt(summary.importadores) },
     { label: 'Rango cargado', value: `${summary.desde ?? '—'} a ${summary.hasta ?? '—'}` },
+    { label: 'Vitales No Disponibles', value: fmtInt(summary.vitalNoDisponible) },
   ];
   document.getElementById('statRow').innerHTML = tiles
     .map(
@@ -401,11 +400,15 @@ document.getElementById('clearFilter').addEventListener('click', () => {
   document.getElementById('fromInput').value = '';
   document.getElementById('toInput').value = '';
   document.getElementById('moleculaSearch').value = '';
-  state = { from: '', to: '', focus: state.focus, q: '' };
+  state = { from: '', to: '', focus: state.focus, q: '', vital: state.vital };
   loadAll();
 });
 document.getElementById('focusToggle').addEventListener('change', (e) => {
   state.focus = e.target.checked;
+  loadAll();
+});
+document.getElementById('vitalSelect').addEventListener('change', (e) => {
+  state.vital = e.target.value;
   loadAll();
 });
 let moleculaSearchTimer = null;

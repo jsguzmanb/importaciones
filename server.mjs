@@ -90,14 +90,18 @@ const FOB = `REPLACE("Valor Fob (USD)", ',', '.')::NUMERIC`;
 const CIF = `REPLACE("Valor Cif (USD)", ',', '.')::NUMERIC`;
 const CANTIDAD = `REPLACE("Cantidad", ',', '.')::NUMERIC`;
 
-// Arma la cláusula WHERE + params ($1, $2, ...) para los filtros de fecha y foco.
+// Arma la cláusula WHERE + params ($1, $2, ...) para los filtros de fecha, foco y
+// Medicamento Vital No Disponible (MVND, ver product-extractor.js isVitalNoDisponible).
 // focusMoleculas ya viene resuelto (ver getFocusMoleculas) para no hacer la consulta
 // de moléculas de interés dentro de cada endpoint. applyFocus=false hace que se ignore
 // ?focus= por completo (usado por /api/by-condicion y /api/condicion/:nombre, que ya
 // filtran explícitamente a un subconjunto de moléculas propio y no deben añadir además
 // la cláusula `molecula = ANY(...)` genérica de foco encima).
+// ?vital=exclude|only controla el selector de 3 estados del dashboard: sin el parámetro
+// (o cualquier otro valor) no filtra por este campo, 'exclude' saca los envíos MVND
+// (importación a nombre de paciente individual, no comercial) y 'only' aísla solo esos.
 function dateFilter(req, focusMoleculas, applyFocus = true) {
-  const { from, to } = req.query;
+  const { from, to, vital } = req.query;
   const clauses = [];
   const params = [];
   if (from) {
@@ -107,6 +111,11 @@ function dateFilter(req, focusMoleculas, applyFocus = true) {
   if (to) {
     params.push(to);
     clauses.push(`anio_mes <= $${params.length}`);
+  }
+  if (vital === 'exclude') {
+    clauses.push(`(vital_no_disponible IS NOT TRUE)`);
+  } else if (vital === 'only') {
+    clauses.push(`vital_no_disponible IS TRUE`);
   }
   if (applyFocus && req.query.focus === '1') {
     if (focusMoleculas.moleculas.length === 0) {
@@ -137,7 +146,8 @@ app.get('/api/summary', async (req, res, next) => {
     const { rows } = await pool.query(
       `SELECT COUNT(*) as filas, MIN(anio_mes) as desde, MAX(anio_mes) as hasta,
               SUM(${FOB}) as "fobTotal", SUM(${CIF}) as "cifTotal",
-              COUNT(DISTINCT molecula) as moleculas, COUNT(DISTINCT "Importador (Razon social)") as importadores
+              COUNT(DISTINCT molecula) as moleculas, COUNT(DISTINCT "Importador (Razon social)") as importadores,
+              COUNT(*) FILTER (WHERE vital_no_disponible IS TRUE) as "vitalNoDisponible"
        FROM ${TABLE} ${where}`,
       params
     );

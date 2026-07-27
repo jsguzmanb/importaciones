@@ -1,8 +1,8 @@
-// Migración de un solo uso: recalcula molecula/marca/extraction_confidence para todas
-// las filas históricas a partir de "Desc Completa De Producto". Correr con
-// `node backfill-products.mjs`; correrlo de nuevo es seguro (recalcula todo, útil tras
-// editar product-overrides.json o ajustar el extractor).
-import { getPool, closePool } from './db.js';
+// Migración de un solo uso: recalcula molecula/marca/extraction_confidence/
+// vital_no_disponible para todas las filas históricas a partir de "Desc Completa De
+// Producto". Correr con `node backfill-products.mjs`; correrlo de nuevo es seguro
+// (recalcula todo, útil tras editar product-overrides.json o ajustar el extractor).
+import { getPool, closePool, ensureSchema } from './db.js';
 import { extractProductWithOverrides, loadOverrides } from './product-extractor.js';
 
 const TABLE = 'importaciones';
@@ -10,6 +10,7 @@ const DESC_COLUMN = 'Desc Completa De Producto';
 
 async function main() {
   const pool = getPool();
+  await ensureSchema();
   const overrides = loadOverrides();
 
   const { rows } = await pool.query(`SELECT id, "${DESC_COLUMN}" AS descripcion FROM ${TABLE}`);
@@ -23,8 +24,8 @@ async function main() {
       const extracted = extractProductWithOverrides(row.descripcion, overrides);
       if (extracted.confidence === 'high') high++;
       await client.query(
-        `UPDATE ${TABLE} SET molecula = $1, marca = $2, extraction_confidence = $3 WHERE id = $4`,
-        [extracted.molecula, extracted.marca, extracted.confidence, row.id]
+        `UPDATE ${TABLE} SET molecula = $1, marca = $2, extraction_confidence = $3, vital_no_disponible = $4 WHERE id = $5`,
+        [extracted.molecula, extracted.marca, extracted.confidence, extracted.vitalNoDisponible, row.id]
       );
     }
     await client.query('COMMIT');

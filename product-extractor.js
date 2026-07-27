@@ -116,6 +116,7 @@ const SALT_PREFIXES = [
   'TARTRATO DE',
   'BROMURO DE',
   'SUCCINATO DE',
+  'BITARTRATO DE',
 ];
 
 function escapeRegExp(str) {
@@ -346,11 +347,29 @@ function cleanMolecula(raw) {
 const MOLECULA_CANONICAL_MAP = new Map([
   ['EELEXACAFTOR/TEZACAFTOR/IVACAFTOR', 'ELEXACAFTOR/TEZACAFTOR/IVACAFTOR'],
   ['PEGCETACOPLÁN', 'PEGCETACOPLAN'],
+  ['VOLANOSERSEN', 'VOLANESORSEN'],
+  ['BITARTRATO DE CISTEAMINA', 'CISTEAMINA'],
 ]);
+
+// Variantes de "inmunoglobulina humana normal" (reemplazo en inmunodeficiencias
+// primarias, vía IGIV/IGSC) que solo difieren en dosis/concentración/vía de
+// administración o en cómo INVIMA describe la pureza del plasma (ej. "PROTEINAS DE
+// PLASMA HUMANO DE LAS CUALES INMUNOGLOBULINAS SON AL MENOS 95%") -- se unifican bajo
+// un solo nombre para que el dashboard no las muestre fragmentadas en 5+ barras
+// distintas. Deliberadamente NO cubre inmunoglobulinas de indicación específica
+// distinta (anti-D para profilaxis Rh, antitimocitos para rechazo de trasplante,
+// anti-varicela zóster para inmunización pasiva específica), que son productos
+// clínicamente distintos y deben permanecer separados.
+const IG_NORMAL_PATTERN = /^(INMUNOGLOBULINA(\s+(HUMANA\s+)?(NORMAL)?)?|PROTE[IÍ]NA(S)?\s+(HUMANA\s+CON\s+)?(DE\s+PLASMA\s+HUMANO\s+)?.*INMUNOGLOBULINA)/i;
+const IG_EXCLUDE_PATTERN = /ANTI\s*-?\s*D\b|ANTITIMOCITOS|VARICELA/i;
 
 function canonicalizeMolecula(value) {
   const key = value.toUpperCase();
-  return MOLECULA_CANONICAL_MAP.get(key) ?? value;
+  if (MOLECULA_CANONICAL_MAP.has(key)) return MOLECULA_CANONICAL_MAP.get(key);
+  if (IG_NORMAL_PATTERN.test(key) && !IG_EXCLUDE_PATTERN.test(key)) {
+    return 'INMUNOGLOBULINA HUMANA NORMAL';
+  }
+  return value;
 }
 
 // Detecta el patrón "MEDICAMENTO VITAL NO DISPONIBLE" (importación a nombre de
