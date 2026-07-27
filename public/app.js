@@ -30,6 +30,24 @@ let state = { from: '', to: '', focus: true, q: '', vital: 'all' };
 const charts = {};
 const lastData = {};
 
+// Set de moléculas marcadas como "de interés" (focus-molecules.json), para resaltarlas
+// en la vista general cuando el toggle de foco está apagado (ahí se listan todas las
+// moléculas mezcladas, así que sin esta marca no hay forma de distinguir las de interés
+// a simple vista). Se carga una sola vez; focus-molecules.json solo cambia por edición
+// manual del archivo, no dentro de una sesión del dashboard.
+let focusMoleculasSet = null;
+let nombreDetalladoPorCondicion = null;
+async function getFocusMoleculasData() {
+  if (focusMoleculasSet) return { focusMoleculasSet, nombreDetalladoPorCondicion };
+  const data = await fetchJSON('/api/focus-molecules');
+  focusMoleculasSet = new Set(data.moleculas);
+  nombreDetalladoPorCondicion = data.nombreDetalladoPorCondicion || {};
+  return { focusMoleculasSet, nombreDetalladoPorCondicion };
+}
+async function getFocusMoleculasSet() {
+  return (await getFocusMoleculasData()).focusMoleculasSet;
+}
+
 function qs(params) {
   const p = new URLSearchParams();
   if (params.from) p.set('from', params.from);
@@ -75,6 +93,17 @@ async function fetchJSON(url) {
   return res.json();
 }
 
+function renderRangeLabel(summary) {
+  const el = document.getElementById('rangeLabel');
+  if (!summary.ultimaFecha) return;
+  // "Fecha" viene como texto YYYY-MM-DD; se parsea como fecha local (no UTC) para que el
+  // día mostrado no se corra por el offset de zona horaria del navegador.
+  const [y, m, d] = summary.ultimaFecha.split('-').map(Number);
+  const fecha = new Date(y, m - 1, d);
+  const texto = fecha.toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' });
+  el.textContent = `Con corte a ${texto}`;
+}
+
 function renderStatRow(summary) {
   const tiles = [
     { label: 'Filas cargadas', value: fmtInt(summary.filas) },
@@ -114,21 +143,29 @@ let moleculaView = { level: 'molecula', path: {} };
 const BAR_ROW_HEIGHT = 20;
 const BAR_CHART_MIN_HEIGHT = 260;
 
-function renderMoleculaBarChart(rows, labelKey, onBarClick) {
+// isFocusRow(row) es opcional -- solo se pasa en la vista general de molécula (sin el
+// toggle de foco activo), donde la lista mezcla moléculas de interés y el resto. Marca
+// esas barras con el color de acento (--series-8, rojo) y antepone una ⭐ a la etiqueta,
+// para poder distinguirlas a simple vista sin tener que activar el filtro.
+// tooltipExtra(row) es opcional -- añade una línea extra al tooltip (usado en el nivel
+// de condición para mostrar el nombre completo de la enfermedad detrás de la sigla,
+// ej. "FQ" -> "Fibrosis Quística").
+function renderMoleculaBarChart(rows, labelKey, onBarClick, isFocusRow, tooltipExtra) {
   destroyChart('moleculaChart');
   const { grid } = chartDefaults();
   const colors = seriesColors();
+  const focusColor = cssVar('--series-8');
   const ctx = document.getElementById('moleculaChart');
   ctx.parentElement.style.height = `${Math.max(BAR_CHART_MIN_HEIGHT, rows.length * BAR_ROW_HEIGHT)}px`;
   charts.moleculaChart = new Chart(ctx, {
     type: 'bar',
     data: {
-      labels: rows.map((r) => r[labelKey]),
+      labels: rows.map((r) => (isFocusRow && isFocusRow(r) ? `★ ${r[labelKey]}` : r[labelKey])),
       datasets: [
         {
           label: 'Valor FOB (USD)',
           data: rows.map((r) => r.fob),
-          backgroundColor: rows.map((_, i) => colors[i % colors.length]),
+          backgroundColor: rows.map((r, i) => (isFocusRow && isFocusRow(r) ? focusColor : colors[i % colors.length])),
           borderRadius: 3,
           maxBarThickness: 14,
           categoryPercentage: 0.9,
@@ -151,6 +188,7 @@ function renderMoleculaBarChart(rows, labelKey, onBarClick) {
         tooltip: {
           callbacks: {
             label: (ctx) => `FOB: ${fmtUSD(ctx.raw)} · ${fmtInt(rows[ctx.dataIndex].filas)} envíos`,
+            afterLabel: tooltipExtra ? (ctx) => tooltipExtra(rows[ctx.dataIndex]) : undefined,
           },
         },
       },
@@ -196,12 +234,31 @@ function goToLevel(level) {
 
 async function loadCondicionChart() {
   moleculaView = { level: 'condicion', path: {} };
-  const rows = await fetchJSON(`/api/by-condicion${qs(state)}`);
+  const [rows, { nombreDetalladoPorCondicion: nombres }] = await Promise.all([
+    fetchJSON(`/api/by-condicion${qs(state)}`),
+    getFocusMoleculasData(),
+  ]);
+  const nombreDetallado = (condicion) => nombres[condicion];
   document.getElementById('moleculaTitle').textContent = 'Importaciones por condición';
-  document.getElementById('moleculaSubtitle').textContent = 'Click en una barra para ver el desglose por molécula.';
+  document.getElementById('moleculaSubtitle').textContent = 'Pasa el mouse sobre una barra para ver el nombre completo de la condición. Click para ver el desglose por molécula.';
   renderMoleculaBreadcrumb();
-  renderMoleculaBarChart(rows, 'condicion', (row) => loadMoleculasOfCondicion(row.condicion));
-  renderTable('moleculaTable', ['Condición', 'Filas', 'FOB', 'CIF'], rows.map((r) => [r.condicion, fmtInt(r.filas), fmtUSD(r.fob), fmtUSD(r.cif)]));
+  renderMoleculaBarChart(
+    rows,
+    'condicion',
+    (row) => loadMoleculasOfCondicion(row.condicion),
+    null,
+    (row) => nombreDetallado(row.condicion)
+  );
+  renderTable(
+    'moleculaTable',
+    ['Condición', 'Filas', 'FOB', 'CIF'],
+    rows.map((r) => [
+      nombreDetallado(r.condicion) ? `<span title="${nombreDetallado(r.condicion)}">${r.condicion}</span>` : r.condicion,
+      fmtInt(r.filas),
+      fmtUSD(r.fob),
+      fmtUSD(r.cif),
+    ])
+  );
   loadMonthChart();
 }
 
@@ -236,16 +293,24 @@ async function loadMoleculaChart() {
     return;
   }
   moleculaView = { level: 'molecula', path: {} };
-  const rows = await fetchJSON(`/api/by-molecula${moleculaQs(state)}`);
+  const [rows, focusSet] = await Promise.all([
+    fetchJSON(`/api/by-molecula${moleculaQs(state)}`),
+    getFocusMoleculasSet(),
+  ]);
+  const isFocusRow = (r) => focusSet.has(r.molecula);
   document.getElementById('moleculaTitle').textContent = 'Importaciones por molécula (principio activo)';
   document.getElementById('moleculaSubtitle').textContent = state.q
-    ? `Resultados para "${state.q}". Click en una barra para ver el desglose por marca.`
-    : 'Top 25 por valor FOB. Click en una barra para ver el desglose por marca.';
+    ? `Resultados para "${state.q}". ★ = molécula de interés. Click en una barra para ver el desglose por marca.`
+    : 'Top 25 por valor FOB. ★ = molécula de interés. Click en una barra para ver el desglose por marca.';
   renderMoleculaBreadcrumb();
   renderMoleculaBarChart(rows, 'molecula', (row) => {
     if (row.molecula !== 'Sin clasificar') drillIntoMolecula(row.molecula);
-  });
-  renderTable('moleculaTable', ['Molécula', 'Filas', 'FOB', 'CIF'], rows.map((r) => [r.molecula, fmtInt(r.filas), fmtUSD(r.fob), fmtUSD(r.cif)]));
+  }, isFocusRow);
+  renderTable(
+    'moleculaTable',
+    ['Molécula', 'Filas', 'FOB', 'CIF'],
+    rows.map((r) => [isFocusRow(r) ? `★ ${r.molecula}` : r.molecula, fmtInt(r.filas), fmtUSD(r.fob), fmtUSD(r.cif)])
+  );
   loadMonthChart();
 }
 
@@ -377,6 +442,55 @@ function renderTable(tableId, headers, rows) {
     `<tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join('')}</tr>`).join('')}</tbody>`;
 }
 
+// Recuerda qué ids de novedades ya se marcaron "Ocultar" en este navegador, para no
+// volver a mostrarlas en visitas futuras aunque sigan dentro de la ventana de ?dias --
+// solo las novedades nuevas desde el último dismiss deben reaparecer.
+const NOVEDADES_DISMISS_KEY = 'novedadesDismissedIds';
+function getDismissedNovedades() {
+  try {
+    return new Set(JSON.parse(localStorage.getItem(NOVEDADES_DISMISS_KEY) || '[]'));
+  } catch {
+    return new Set();
+  }
+}
+function dismissNovedades(ids) {
+  const current = getDismissedNovedades();
+  ids.forEach((id) => current.add(id));
+  localStorage.setItem(NOVEDADES_DISMISS_KEY, JSON.stringify([...current]));
+}
+
+async function loadNovedades() {
+  let novedades;
+  try {
+    novedades = await fetchJSON('/api/novedades?dias=30');
+  } catch (err) {
+    console.error('No se pudo cargar novedades:', err);
+    return;
+  }
+  const dismissed = getDismissedNovedades();
+  const visibles = novedades.filter((n) => !dismissed.has(`${n.molecula}|${n.anio_mes}`));
+
+  const banner = document.getElementById('novedadesBanner');
+  const list = document.getElementById('novedadesList');
+  if (visibles.length === 0) {
+    banner.classList.remove('show');
+    return;
+  }
+
+  list.innerHTML = visibles
+    .map((n) => {
+      const fecha = new Date(n.detectada_en).toLocaleDateString('es-CO', { year: 'numeric', month: 'short', day: 'numeric' });
+      return `<li>${n.molecula}${n.anio_mes ? ` <span class="fecha">(${n.anio_mes})</span>` : ''}<span class="fecha">${fecha}</span></li>`;
+    })
+    .join('');
+  banner.classList.add('show');
+
+  document.getElementById('novedadesDismiss').onclick = () => {
+    dismissNovedades(visibles.map((n) => `${n.molecula}|${n.anio_mes}`));
+    banner.classList.remove('show');
+  };
+}
+
 async function loadAll() {
   const [summary, , tariff, country, importer] = await Promise.all([
     fetchJSON(`/api/summary${qs(state)}`),
@@ -384,8 +498,10 @@ async function loadAll() {
     fetchJSON(`/api/by-tariff${qs(state)}`),
     fetchJSON(`/api/by-country${qs(state)}`),
     fetchJSON(`/api/by-importer${qs(state)}`),
+    loadNovedades(),
   ]);
   renderStatRow(summary);
+  renderRangeLabel(summary);
   renderSimpleBar('tariffChart', 'tariffTable', tariff, 'partida');
   renderSimpleBar('countryChart', 'countryTable', country, 'pais');
   renderSimpleBar('importerChart', 'importerTable', importer, 'importador');

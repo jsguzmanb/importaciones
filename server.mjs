@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import express from 'express';
-import { getPool } from './db.js';
+import { getPool, getNovedades } from './db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -47,7 +47,20 @@ async function getFocusMoleculas() {
     const entries = (raw.keywords || []).map((k) => ({
       keyword: normalize(k.keyword),
       condicion: k.condicion,
+      condicionDetallada: k.condicionDetallada,
     }));
+
+    // Mapa sigla -> nombre completo (ej. "FQ" -> "Fibrosis Quística"), para mostrar el
+    // nombre detallado de la enfermedad en el dashboard sin reemplazar la sigla corta
+    // usada como identificador funcional en agrupación/filtros/breadcrumb. Varias
+    // keywords comparten condicion (misma sigla), así que solo hace falta una entrada
+    // por sigla, no por keyword.
+    const nombreDetalladoPorCondicion = {};
+    for (const e of entries) {
+      if (e.condicionDetallada && !nombreDetalladoPorCondicion[e.condicion]) {
+        nombreDetalladoPorCondicion[e.condicion] = e.condicionDetallada;
+      }
+    }
 
     const pool = getPool();
     const { rows } = await pool.query(`SELECT DISTINCT molecula FROM ${TABLE} WHERE molecula IS NOT NULL`);
@@ -72,6 +85,7 @@ async function getFocusMoleculas() {
       keywords: (raw.keywords || []).map((k) => k.keyword),
       moleculas,
       condicionPorMolecula,
+      nombreDetalladoPorCondicion,
     };
     focusCache = { data, expiresAt: Date.now() + CACHE_TTL_MS };
     return data;
@@ -151,7 +165,13 @@ app.get('/api/summary', async (req, res, next) => {
        FROM ${TABLE} ${where}`,
       params
     );
-    res.json(rows[0]);
+    // Fecha máxima real (columna "Fecha", no el mes anio_mes) sobre TODA la tabla, sin
+    // aplicar los filtros de rango/foco de este request -- es el "corte" de los datos
+    // cargados, no algo que deba cambiar según lo que el usuario esté filtrando.
+    const { rows: corte } = await pool.query(
+      `SELECT MAX("Fecha") as "ultimaFecha" FROM ${TABLE}`
+    );
+    res.json({ ...rows[0], ultimaFecha: corte[0].ultimaFecha });
   } catch (err) {
     next(err);
   }
@@ -478,6 +498,17 @@ app.get('/api/molecula/:nombre', async (req, res, next) => {
       params
     );
     res.json(rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Alertas de moléculas nunca antes vistas (ver db.js recordNewMoleculas), detectadas en
+// las últimas ?dias (default 30). Usado por la sección "Novedades" del dashboard.
+app.get('/api/novedades', async (req, res, next) => {
+  try {
+    const dias = Number(req.query.dias) || 30;
+    res.json(await getNovedades(dias));
   } catch (err) {
     next(err);
   }

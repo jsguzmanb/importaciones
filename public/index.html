@@ -7,20 +7,23 @@
 <style>
   .viz-root {
     color-scheme: light;
-    --surface-1:      #fcfcfb;
-    --page:           #f9f9f7;
-    --text-primary:   #0b0b0b;
-    --text-secondary: #52514e;
-    --text-muted:     #898781;
-    --gridline:       #e1e0d9;
+    --surface-1:      #ffffff;
+    --page:           #f4f6f8;
+    --text-primary:   #0b1b3a;
+    --text-secondary: #52616f;
+    --text-muted:     #8a97a3;
+    --gridline:       #e3e7eb;
     --baseline:       #c3c2b7;
-    --border:         rgba(11,11,11,0.10);
-    --series-1: #2a78d6; /* blue */
-    --series-2: #eb6834; /* orange */
-    --series-3: #1baf7a; /* aqua */
+    --border:         rgba(11,27,58,0.10);
+    --navy:           #0b1b3a;
+    --navy-2:         #13284f;
+    --accent-green:   #14b881;
+    --series-1: #14b881; /* green (brand accent) */
+    --series-2: #0b1b3a; /* navy */
+    --series-3: #2a78d6; /* blue */
     --series-4: #eda100; /* yellow */
     --series-5: #e87ba4; /* magenta */
-    --series-6: #008300; /* green */
+    --series-6: #eb6834; /* orange */
     --series-7: #4a3aa7; /* violet */
     --series-8: #e34948; /* red */
   }
@@ -39,24 +42,52 @@
   .page {
     max-width: 1200px;
     margin: 0 auto;
-    padding: 24px 20px 60px;
+    padding: 0 20px 60px;
   }
   header.top {
     display: flex;
-    align-items: baseline;
+    align-items: center;
+    justify-content: center;
+    width: 100vw;
+    margin: 0 calc(50% - 50vw) 24px;
+    padding: 22px 20px;
+    background: linear-gradient(135deg, var(--navy) 0%, var(--navy-2) 100%);
+    color: #fff;
+  }
+  header.top .header-inner {
+    display: flex;
+    align-items: center;
     justify-content: space-between;
     flex-wrap: wrap;
-    gap: 12px;
-    margin-bottom: 20px;
+    gap: 16px;
+    width: 100%;
+    max-width: 1200px;
+  }
+  header.top .brand {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  header.top .logo-mark {
+    height: 52px;
+    width: auto;
+    flex-shrink: 0;
+    object-fit: contain;
+  }
+  header.top .titles {
+    border-left: 1px solid rgba(255,255,255,0.25);
+    padding-left: 16px;
   }
   header.top h1 {
-    font-size: 1.4rem;
+    font-size: 1.5rem;
     margin: 0;
+    font-weight: 700;
+    color: #fff;
   }
   header.top p {
     margin: 4px 0 0;
-    color: var(--text-secondary);
-    font-size: 0.9rem;
+    color: rgba(255,255,255,0.65);
+    font-size: 0.85rem;
   }
   .filters {
     display: flex;
@@ -66,6 +97,7 @@
     border: 1px solid var(--border);
     border-radius: 10px;
     padding: 8px 12px;
+    box-shadow: 0 1px 2px rgba(11,27,58,0.06);
   }
   .filters label {
     font-size: 0.8rem;
@@ -86,8 +118,9 @@
     border: 1px solid var(--border);
     border-radius: 6px;
     padding: 5px 12px;
-    background: var(--series-1);
-    color: white;
+    background: var(--accent-green);
+    color: var(--navy);
+    font-weight: 600;
     cursor: pointer;
   }
 
@@ -100,8 +133,10 @@
   .stat-tile {
     background: var(--surface-1);
     border: 1px solid var(--border);
+    border-left: 3px solid var(--accent-green);
     border-radius: 12px;
     padding: 14px 16px;
+    box-shadow: 0 1px 2px rgba(11,27,58,0.05);
   }
   .stat-tile .label {
     font-size: 0.78rem;
@@ -193,9 +228,9 @@
     cursor: pointer;
   }
   .tabs button.active {
-    background: var(--series-1);
+    background: var(--navy);
     color: white;
-    border-color: var(--series-1);
+    border-color: var(--navy);
   }
   .tab-panel { display: none; }
   .tab-panel.active { display: block; }
@@ -207,7 +242,7 @@
   }
   .breadcrumb button {
     font: inherit;
-    color: var(--series-1);
+    color: var(--navy);
     background: none;
     border: none;
     padding: 0;
@@ -221,37 +256,105 @@
     color: var(--text-muted);
     font-size: 0.9rem;
   }
+
+  .novedades-banner {
+    background: #fff8e6;
+    border: 1px solid #eecb7a;
+    border-radius: 12px;
+    padding: 12px 16px;
+    margin-bottom: 20px;
+    display: none;
+  }
+  .novedades-banner.show { display: block; }
+  .novedades-banner .head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .novedades-banner .head h2 {
+    font-size: 0.95rem;
+    margin: 0;
+    color: #6b4c00;
+  }
+  .novedades-banner .head h2::before {
+    content: "⚠ ";
+  }
+  .novedades-banner button.dismiss {
+    font: inherit;
+    font-size: 0.78rem;
+    color: #6b4c00;
+    background: none;
+    border: 1px solid #eecb7a;
+    border-radius: 6px;
+    padding: 3px 10px;
+    cursor: pointer;
+  }
+  .novedades-list {
+    list-style: none;
+    margin: 10px 0 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .novedades-list li {
+    background: #fff;
+    border: 1px solid #eecb7a;
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: 0.82rem;
+    color: #4a3400;
+  }
+  .novedades-list li .fecha {
+    color: var(--text-muted);
+    margin-left: 6px;
+    font-size: 0.75rem;
+  }
 </style>
 </head>
 <body>
 <div class="viz-root page">
 
   <header class="top">
-    <div>
-      <h1>Importaciones — Colombia</h1>
-      <p id="rangeLabel">Base DAATER ONLINE 2025-2026</p>
-    </div>
-    <div class="filters">
-      <label for="fromInput">Desde</label>
-      <input type="month" id="fromInput" />
-      <label for="toInput">Hasta</label>
-      <input type="month" id="toInput" />
-      <button id="applyFilter">Aplicar</button>
-      <button id="clearFilter" style="background:none;color:var(--text-secondary)">Limpiar</button>
-      <label style="display:flex;align-items:center;gap:6px;margin-left:6px" title="Filtra todo el dashboard a las moléculas marcadas como de interés en focus-molecules.json">
-        <input type="checkbox" id="focusToggle" checked />
-        Solo moléculas de interés
-      </label>
-      <label style="display:flex;align-items:center;gap:6px;margin-left:6px" title="Los registros 'Medicamento Vital No Disponible' son importaciones a nombre de un paciente individual (no comerciales) — puedes excluirlos o aislarlos del resto del dashboard">
-        Vitales No Disponibles
-        <select id="vitalSelect" style="font:inherit;font-size:0.85rem;border:1px solid var(--border);border-radius:6px;padding:4px 6px;background:var(--surface-1);color:var(--text-primary)">
-          <option value="all" selected>Todos</option>
-          <option value="exclude">Excluir</option>
-          <option value="only">Solo estos</option>
-        </select>
-      </label>
+    <div class="header-inner">
+      <div class="brand">
+        <img class="logo-mark" id="logoMark" src="/logo.png" alt="Valentech for Life" />
+        <div class="titles">
+          <h1>Importaciones — Colombia</h1>
+          <p id="rangeLabel">Base DAATER ONLINE 2025-2026</p>
+        </div>
+      </div>
+      <div class="filters">
+        <label for="fromInput">Desde</label>
+        <input type="month" id="fromInput" />
+        <label for="toInput">Hasta</label>
+        <input type="month" id="toInput" />
+        <button id="applyFilter">Aplicar</button>
+        <button id="clearFilter" style="background:none;color:var(--text-secondary)">Limpiar</button>
+        <label style="display:flex;align-items:center;gap:6px;margin-left:6px" title="Filtra todo el dashboard a las moléculas marcadas como de interés en focus-molecules.json">
+          <input type="checkbox" id="focusToggle" checked />
+          Solo moléculas de interés
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;margin-left:6px" title="Los registros 'Medicamento Vital No Disponible' son importaciones a nombre de un paciente individual (no comerciales) — puedes excluirlos o aislarlos del resto del dashboard">
+          Vitales No Disponibles
+          <select id="vitalSelect" style="font:inherit;font-size:0.85rem;border:1px solid var(--border);border-radius:6px;padding:4px 6px;background:var(--surface-1);color:var(--text-primary)">
+            <option value="all" selected>Todos</option>
+            <option value="exclude">Excluir</option>
+            <option value="only">Solo estos</option>
+          </select>
+        </label>
+      </div>
     </div>
   </header>
+
+  <div class="novedades-banner" id="novedadesBanner">
+    <div class="head">
+      <h2>Novedades: moléculas nuevas detectadas</h2>
+      <button class="dismiss" id="novedadesDismiss">Ocultar</button>
+    </div>
+    <ul class="novedades-list" id="novedadesList"></ul>
+  </div>
 
   <div class="stat-row" id="statRow"></div>
 

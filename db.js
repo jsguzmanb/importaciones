@@ -118,6 +118,95 @@ export async function ensureSchema() {
   await pool.query(`ALTER TABLE ${TABLE} ADD COLUMN IF NOT EXISTS vital_no_disponible BOOLEAN`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_${TABLE}_anio_mes ON ${TABLE} (anio_mes)`);
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_${TABLE}_molecula ON ${TABLE} (molecula)`);
+
+  // moleculas_conocidas registra, de forma durable entre corridas, la primera vez que se
+  // vio cada molécula -- necesario porque replaceMonthData() borra y reinserta un mes
+  // completo en cada corrida, así que no se puede detectar "molécula nueva" comparando
+  // solo las filas del mes actual contra sí mismas.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS moleculas_conocidas (
+      molecula TEXT PRIMARY KEY,
+      primera_vez_vista TIMESTAMPTZ NOT NULL DEFAULT now(),
+      primer_anio_mes TEXT
+    )
+  `);
+
+  // novedades es el log de alertas mostrado en el dashboard: una fila por molécula nueva
+  // detectada en cada corrida del scraper (no se sobreescribe, para conservar historial).
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS novedades (
+      id SERIAL PRIMARY KEY,
+      molecula TEXT NOT NULL,
+      anio_mes TEXT,
+      filas INTEGER,
+      detectada_en TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_novedades_detectada_en ON novedades (detectada_en)`);
+
+  await seedMoleculasConocidas(pool);
+}
+
+// Si moleculas_conocidas está vacía pero importaciones ya tiene datos (tabla recién
+// creada contra una base histórica ya cargada, o recreada desde cero), hay que sembrarla
+// con todo lo que ya existe -- si no, recordNewMoleculas() trataría cada molécula
+// histórica como "nueva" en la primera corrida después de crear la tabla, generando
+// cientos de falsas alertas de golpe.
+async function seedMoleculasConocidas(pool) {
+  const { rows: countRows } = await pool.query(`SELECT COUNT(*) AS n FROM moleculas_conocidas`);
+  if (Number(countRows[0].n) > 0) return;
+
+  const { rows: existing } = await pool.query(
+    `SELECT DISTINCT molecula, MIN(anio_mes) AS anio_mes
+     FROM ${TABLE}
+     WHERE molecula IS NOT NULL
+     GROUP BY molecula`
+  );
+  if (existing.length === 0) return;
+
+  for (const { molecula, anio_mes } of existing) {
+    await pool.query(
+      `INSERT INTO moleculas_conocidas (molecula, primer_anio_mes) VALUES ($1, $2)
+       ON CONFLICT (molecula) DO NOTHING`,
+      [molecula, anio_mes]
+    );
+  }
+}
+
+// Compara las moléculas presentes en `extractedRows` (ya con molecula/marca calculados)
+// contra moleculas_conocidas y registra como novedad cualquiera que no se haya visto
+// nunca antes. Pensado para llamarse una vez por mes/base procesado dentro de la misma
+// transacción de replaceMonthData(), para que la detección de "nueva" quede consistente
+// con lo que efectivamente se insertó.
+async function recordNewMoleculas(client, anioMes, extractedRows) {
+  const countByMolecula = new Map();
+  for (const r of extractedRows) {
+    if (!r.molecula) continue;
+    countByMolecula.set(r.molecula, (countByMolecula.get(r.molecula) ?? 0) + 1);
+  }
+  if (countByMolecula.size === 0) return [];
+
+  const moleculas = [...countByMolecula.keys()];
+  const { rows: known } = await client.query(
+    `SELECT molecula FROM moleculas_conocidas WHERE molecula = ANY($1)`,
+    [moleculas]
+  );
+  const knownSet = new Set(known.map((r) => r.molecula));
+  const nuevas = moleculas.filter((m) => !knownSet.has(m));
+  if (nuevas.length === 0) return [];
+
+  for (const molecula of nuevas) {
+    await client.query(
+      `INSERT INTO moleculas_conocidas (molecula, primer_anio_mes) VALUES ($1, $2)
+       ON CONFLICT (molecula) DO NOTHING`,
+      [molecula, anioMes]
+    );
+    await client.query(
+      `INSERT INTO novedades (molecula, anio_mes, filas) VALUES ($1, $2, $3)`,
+      [molecula, anioMes, countByMolecula.get(molecula)]
+    );
+  }
+  return nuevas;
 }
 
 export async function getLatestMonth() {
@@ -157,8 +246,9 @@ export async function replaceMonthData(anioMes, rows) {
   const insertColumns = [...columns, 'anio_mes', 'molecula', 'marca', 'extraction_confidence', 'vital_no_disponible'];
   const columnList = insertColumns.map(quoteIdent).join(', ');
 
-  const allValues = rows.map((row) => {
-    const extracted = extractProductWithOverrides(row[DESC_COLUMN], overrides);
+  const extractedRows = rows.map((row) => extractProductWithOverrides(row[DESC_COLUMN], overrides));
+  const allValues = rows.map((row, i) => {
+    const extracted = extractedRows[i];
     return [
       ...columns.map((c) => row[c] ?? null),
       anioMes,
@@ -170,6 +260,7 @@ export async function replaceMonthData(anioMes, rows) {
   });
 
   const client = await pool.connect();
+  let nuevasMoleculas = [];
   try {
     await client.query('BEGIN');
     await client.query(`DELETE FROM ${TABLE} WHERE anio_mes = $1`, [anioMes]);
@@ -190,6 +281,8 @@ export async function replaceMonthData(anioMes, rows) {
       );
     }
 
+    nuevasMoleculas = await recordNewMoleculas(client, anioMes, extractedRows);
+
     await client.query('COMMIT');
   } catch (err) {
     await client.query('ROLLBACK');
@@ -197,4 +290,21 @@ export async function replaceMonthData(anioMes, rows) {
   } finally {
     client.release();
   }
+  return { nuevasMoleculas };
+}
+
+// Últimas novedades (moléculas nunca antes vistas) para mostrar como alertas en el
+// dashboard. limitDias acota a detecciones recientes; sin filtro de fecha se acumularían
+// indefinidamente en la vista aunque ya se hayan revisado hace meses.
+export async function getNovedades(limitDias = 30) {
+  const pool = getPool();
+  await ensureSchema();
+  const { rows } = await pool.query(
+    `SELECT molecula, anio_mes, filas, detectada_en
+     FROM novedades
+     WHERE detectada_en >= now() - ($1 || ' days')::interval
+     ORDER BY detectada_en DESC`,
+    [limitDias]
+  );
+  return rows;
 }

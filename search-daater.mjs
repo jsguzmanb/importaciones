@@ -312,12 +312,14 @@ async function setDateRange(page, fromDate, toDate) {
 
     const rows = parseWorkbook(filePath);
     const byMonth = groupRowsByMonth(rows);
+    const nuevasMoleculas = new Set();
     for (const [anioMes, monthRows] of byMonth) {
-      await replaceMonthData(anioMes, monthRows);
+      const { nuevasMoleculas: nuevas } = await replaceMonthData(anioMes, monthRows);
       console.log(`  Base maestra: mes ${anioMes} actualizado (${monthRows.length} filas).`);
+      nuevas.forEach((m) => nuevasMoleculas.add(m));
     }
 
-    results.push({ base: baseName, rowCount, filePath });
+    results.push({ base: baseName, rowCount, filePath, nuevasMoleculas: [...nuevasMoleculas] });
   }
 
   await browser.close();
@@ -326,6 +328,15 @@ async function setDateRange(page, fromDate, toDate) {
   console.log('\nResumen:');
   for (const r of results) {
     console.log(`  ${r.base}: ${r.rowCount ?? '?'} filas -> ${r.filePath}`);
+  }
+
+  const todasLasNuevas = [...new Set(results.flatMap((r) => r.nuevasMoleculas ?? []))];
+  if (todasLasNuevas.length) {
+    console.log('\nNOVEDADES: moléculas nuevas detectadas en esta corrida:');
+    todasLasNuevas.forEach((m) => console.log(`  * ${m}`));
+    console.log('Revísalas en el dashboard (sección Novedades).');
+  } else {
+    console.log('\nSin novedades: no se detectaron moléculas nuevas en esta corrida.');
   }
 })().catch((err) => {
   console.error('Error en la automatización:', err);
