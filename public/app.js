@@ -44,6 +44,19 @@ function qs(params) {
   return s ? `?${s}` : '';
 }
 
+// Igual que qs(), más condicion/molecula del drill-down actual — usado solo por
+// /api/by-month para que la evolución mensual siga el recorte que se esté explorando.
+function monthQs(params) {
+  const p = new URLSearchParams();
+  if (params.from) p.set('from', params.from);
+  if (params.to) p.set('to', params.to);
+  if (params.focus) p.set('focus', '1');
+  if (moleculaView.path.molecula) p.set('molecula', moleculaView.path.molecula);
+  else if (moleculaView.path.condicion) p.set('condicion', moleculaView.path.condicion);
+  const s = p.toString();
+  return s ? `?${s}` : '';
+}
+
 function moleculaQs(params) {
   const p = new URLSearchParams();
   if (params.from) p.set('from', params.from);
@@ -176,6 +189,7 @@ async function loadCondicionChart() {
   renderMoleculaBreadcrumb();
   renderMoleculaBarChart(rows, 'condicion', (row) => loadMoleculasOfCondicion(row.condicion));
   renderTable('moleculaTable', ['Condición', 'Filas', 'FOB', 'CIF'], rows.map((r) => [r.condicion, fmtInt(r.filas), fmtUSD(r.fob), fmtUSD(r.cif)]));
+  loadMonthChart();
 }
 
 async function loadMoleculasOfCondicion(condicion) {
@@ -186,6 +200,7 @@ async function loadMoleculasOfCondicion(condicion) {
   renderMoleculaBreadcrumb();
   renderMoleculaBarChart(rows, 'molecula', (row) => drillIntoMolecula(row.molecula, condicion));
   renderTable('moleculaTable', ['Molécula', 'Filas', 'FOB', 'CIF'], rows.map((r) => [r.molecula, fmtInt(r.filas), fmtUSD(r.fob), fmtUSD(r.cif)]));
+  loadMonthChart();
 }
 
 async function drillIntoMolecula(nombre, condicion) {
@@ -196,6 +211,7 @@ async function drillIntoMolecula(nombre, condicion) {
   renderMoleculaBreadcrumb();
   renderMoleculaBarChart(rows, 'marca');
   renderTable('moleculaTable', ['Marca', 'Filas', 'FOB', 'CIF'], rows.map((r) => [r.marca, fmtInt(r.filas), fmtUSD(r.fob), fmtUSD(r.cif)]));
+  loadMonthChart();
 }
 
 // Punto de entrada del bloque de moléculas: con foco activo y sin búsqueda de texto,
@@ -217,6 +233,16 @@ async function loadMoleculaChart() {
     if (row.molecula !== 'Sin clasificar') drillIntoMolecula(row.molecula);
   });
   renderTable('moleculaTable', ['Molécula', 'Filas', 'FOB', 'CIF'], rows.map((r) => [r.molecula, fmtInt(r.filas), fmtUSD(r.fob), fmtUSD(r.cif)]));
+  loadMonthChart();
+}
+
+async function loadMonthChart() {
+  const rows = await fetchJSON(`/api/by-month${monthQs(state)}`);
+  const label = moleculaView.path.molecula || moleculaView.path.condicion;
+  document.getElementById('monthSubtitle').textContent = label
+    ? `Valor FOB y CIF importado por mes — ${label}.`
+    : 'Valor FOB y CIF importado por mes.';
+  renderMonthChart(rows);
 }
 
 function renderMonthChart(rows) {
@@ -313,16 +339,14 @@ function renderTable(tableId, headers, rows) {
 }
 
 async function loadAll() {
-  const [summary, , month, tariff, country, importer] = await Promise.all([
+  const [summary, , tariff, country, importer] = await Promise.all([
     fetchJSON(`/api/summary${qs(state)}`),
     loadMoleculaChart(),
-    fetchJSON(`/api/by-month${qs(state)}`),
     fetchJSON(`/api/by-tariff${qs(state)}`),
     fetchJSON(`/api/by-country${qs(state)}`),
     fetchJSON(`/api/by-importer${qs(state)}`),
   ]);
   renderStatRow(summary);
-  renderMonthChart(month);
   renderSimpleBar('tariffChart', 'tariffTable', tariff, 'partida');
   renderSimpleBar('countryChart', 'countryTable', country, 'pais');
   renderSimpleBar('importerChart', 'importerTable', importer, 'importador');

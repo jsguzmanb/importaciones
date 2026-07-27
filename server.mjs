@@ -252,14 +252,42 @@ app.get('/api/by-molecula', async (req, res, next) => {
   }
 });
 
+// ?condicion= y/o ?molecula= restringen la evolución mensual al recorte que el
+// usuario esté viendo en el drill-down de Condición -> Molécula -> Marca, para que la
+// gráfica de evolución siga lo que se está explorando en vez de mostrar siempre el
+// total general. condicion se resuelve vía condicionPorMolecula (igual que
+// /api/by-condicion), ya que no es una columna real de la tabla.
 app.get('/api/by-month', async (req, res, next) => {
   try {
     const pool = getPool();
     const focusMoleculas = await getFocusMoleculas();
     const { where, params } = dateFilter(req, focusMoleculas);
+    const clauses = [];
+
+    const molecula = (req.query.molecula || '').trim();
+    if (molecula) {
+      params.push(molecula);
+      clauses.push(`molecula = $${params.length}`);
+    } else {
+      const condicion = (req.query.condicion || '').trim();
+      if (condicion) {
+        const moleculasDeCondicion = focusMoleculas.moleculas.filter(
+          (m) => (focusMoleculas.condicionPorMolecula[m] ?? 'Sin condición') === condicion
+        );
+        if (moleculasDeCondicion.length === 0) {
+          res.json([]);
+          return;
+        }
+        params.push(moleculasDeCondicion);
+        clauses.push(`molecula = ANY($${params.length})`);
+      }
+    }
+
+    const extra = where ? 'AND' : 'WHERE';
+    const extraWhere = clauses.length ? `${extra} ${clauses.join(' AND ')}` : '';
     const { rows } = await pool.query(
       `SELECT anio_mes, COUNT(*) as filas, SUM(${FOB}) as fob, SUM(${CIF}) as cif
-       FROM ${TABLE} ${where}
+       FROM ${TABLE} ${where} ${extraWhere}
        GROUP BY anio_mes
        ORDER BY anio_mes ASC`,
       params
