@@ -295,16 +295,46 @@ async function computeBreakdownSeries(pool, groupCol, where, extraWhere, params,
   return { meses, series };
 }
 
+// Igual que computeBreakdownSeries pero agrupando por condición/área terapéutica en vez
+// de una columna real de la tabla -- condicion no existe como columna, así que se trae
+// el FOB mensual por molécula (limitado al conjunto de moléculas de interés) y se
+// reagrupa en JS vía condicionPorMolecula, igual que hace /api/by-condicion. No hay
+// "Otras" aquí: el conjunto de condiciones ya es acotado (focus-molecules.json).
+async function computeCondicionBreakdown(pool, focusMoleculas, where, extraWhere, params, total) {
+  const { rows: monthly } = await pool.query(
+    `SELECT anio_mes, molecula, SUM(${FOB}) as fob
+     FROM ${TABLE} ${where} ${extraWhere}
+     GROUP BY anio_mes, molecula`,
+    params
+  );
+  const meses = total.map((r) => r.anio_mes);
+  const porCondicion = new Map();
+  for (const r of monthly) {
+    const condicion = focusMoleculas.condicionPorMolecula[r.molecula] ?? 'Sin condición';
+    if (!porCondicion.has(condicion)) porCondicion.set(condicion, new Map());
+    const porMes = porCondicion.get(condicion);
+    porMes.set(r.anio_mes, (porMes.get(r.anio_mes) ?? 0) + Number(r.fob));
+  }
+  const series = [...porCondicion.entries()]
+    .map(([nombre, porMes]) => ({ nombre, data: meses.map((m) => porMes.get(m) ?? 0) }))
+    .sort((a, b) => b.data.reduce((s, v) => s + v, 0) - a.data.reduce((s, v) => s + v, 0));
+  return { meses, series };
+}
+
 // ?condicion= y/o ?molecula= restringen la evolución mensual al recorte que el
 // usuario esté viendo en el drill-down de Condición -> Molécula -> Marca, para que la
 // gráfica de evolución siga lo que se está explorando en vez de mostrar siempre el
 // total general. condicion se resuelve vía condicionPorMolecula (igual que
-// /api/by-condicion), ya que no es una columna real de la tabla.
+// /api/by-condicion), ya que no es una columna real de la tabla. ?level=condicion marca
+// el nivel raíz del drill-down (con foco activo, comparando áreas terapéuticas), donde
+// no hay ni condicion ni molecula seleccionada todavía.
 //
-// Además del total, se calcula un desglose mensual por líneas: por marca cuando ya hay
-// una molécula puntual seleccionada (?molecula=), o por molécula en cualquier otro caso
-// (condición seleccionada, o vista general/búsqueda sin drill-down) -- top N por FOB
-// total, agrupando el resto en "Otras" para no saturar la gráfica de líneas.
+// Además del total, se calcula un desglose mensual por líneas: por condición a nivel
+// raíz (?level=condicion), por marca cuando ya hay una molécula puntual seleccionada
+// (?molecula=), o por molécula en cualquier otro caso (condición seleccionada, o vista
+// general/búsqueda sin drill-down) -- top N por FOB total, agrupando el resto en
+// "Otras" para no saturar la gráfica de líneas (excepto el desglose por condición, que
+// no agrupa "Otras" al ser un conjunto ya acotado).
 app.get('/api/by-month', async (req, res, next) => {
   try {
     const pool = getPool();
@@ -313,6 +343,7 @@ app.get('/api/by-month', async (req, res, next) => {
     const clauses = [];
 
     const molecula = (req.query.molecula || '').trim();
+    const isCondicionLevel = !molecula && req.query.level === 'condicion';
     if (molecula) {
       params.push(molecula);
       clauses.push(`molecula = $${params.length}`);
@@ -341,10 +372,15 @@ app.get('/api/by-month', async (req, res, next) => {
       params
     );
 
-    const groupCol = molecula ? 'marca' : 'molecula';
-    const breakdown = total.length
-      ? { by: groupCol, ...(await computeBreakdownSeries(pool, groupCol, where, extraWhere, params, total)) }
-      : null;
+    let breakdown = null;
+    if (total.length) {
+      if (isCondicionLevel) {
+        breakdown = { by: 'condicion', ...(await computeCondicionBreakdown(pool, focusMoleculas, where, extraWhere, params, total)) };
+      } else {
+        const groupCol = molecula ? 'marca' : 'molecula';
+        breakdown = { by: groupCol, ...(await computeBreakdownSeries(pool, groupCol, where, extraWhere, params, total)) };
+      }
+    }
 
     res.json({ total, breakdown });
   } catch (err) {

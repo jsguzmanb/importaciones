@@ -44,8 +44,11 @@ function qs(params) {
   return s ? `?${s}` : '';
 }
 
-// Igual que qs(), más condicion/molecula del drill-down actual — usado solo por
+// Igual que qs(), más condicion/molecula/level del drill-down actual — usado solo por
 // /api/by-month para que la evolución mensual siga el recorte que se esté explorando.
+// level='condicion' (el nivel raíz cuando el foco está activo, comparando áreas
+// terapéuticas) le indica al backend que desglose por condición en vez de por molécula,
+// ya que en ese nivel path no trae ni condicion ni molecula seleccionada.
 function monthQs(params) {
   const p = new URLSearchParams();
   if (params.from) p.set('from', params.from);
@@ -53,6 +56,7 @@ function monthQs(params) {
   if (params.focus) p.set('focus', '1');
   if (moleculaView.path.molecula) p.set('molecula', moleculaView.path.molecula);
   else if (moleculaView.path.condicion) p.set('condicion', moleculaView.path.condicion);
+  else if (moleculaView.level === 'condicion') p.set('level', 'condicion');
   const s = p.toString();
   return s ? `?${s}` : '';
 }
