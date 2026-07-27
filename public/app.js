@@ -247,19 +247,20 @@ async function loadMoleculaChart() {
 }
 
 async function loadMonthChart() {
-  const { total, porMarca } = await fetchJSON(`/api/by-month${monthQs(state)}`);
+  const { total, breakdown } = await fetchJSON(`/api/by-month${monthQs(state)}`);
   const label = moleculaView.path.molecula || moleculaView.path.condicion;
   document.getElementById('monthSubtitle').textContent = label
     ? `Valor FOB y CIF importado por mes — ${label}.`
     : 'Valor FOB y CIF importado por mes.';
-  renderMonthChart(total, porMarca);
+  renderMonthChart(total, breakdown);
 }
 
-// porMarca (solo presente cuando el drill-down está a nivel de una molécula puntual,
-// ver /api/by-month) trae una línea de FOB por cada una de las top N marcas más una
-// serie "Otras" agrupando el resto — reemplaza la vista de FOB/CIF total, ya que ambas
-// no caben con claridad en la misma gráfica de líneas.
-function renderMonthChart(rows, porMarca) {
+// breakdown (ver /api/by-month) trae una línea de FOB por cada uno de los top N valores
+// de la columna relevante en el nivel actual del drill-down -- por marca cuando ya hay
+// una molécula puntual seleccionada, o por molécula en cualquier otro caso (condición o
+// vista general) -- más una serie "Otras" agrupando el resto. Reemplaza la vista de
+// FOB/CIF total, ya que ambas no caben con claridad en la misma gráfica de líneas.
+function renderMonthChart(rows, breakdown) {
   lastData.month = rows;
   destroyChart('monthChart');
   const { grid } = chartDefaults();
@@ -267,9 +268,9 @@ function renderMonthChart(rows, porMarca) {
   const ctx = document.getElementById('monthChart');
 
   const datasets =
-    porMarca && porMarca.series.length
-      ? porMarca.series.map((s, i) => ({
-          label: s.marca,
+    breakdown && breakdown.series.length
+      ? breakdown.series.map((s, i) => ({
+          label: s.nombre,
           data: s.data,
           borderColor: colors[i % colors.length],
           backgroundColor: 'transparent',
@@ -302,7 +303,7 @@ function renderMonthChart(rows, porMarca) {
   charts.monthChart = new Chart(ctx, {
     type: 'line',
     data: {
-      labels: (porMarca ? porMarca.meses : rows.map((r) => r.anio_mes)),
+      labels: (breakdown ? breakdown.meses : rows.map((r) => r.anio_mes)),
       datasets,
     },
     options: {
@@ -320,9 +321,9 @@ function renderMonthChart(rows, porMarca) {
     },
   });
 
-  if (porMarca && porMarca.series.length) {
-    const headers = ['Mes', ...porMarca.series.map((s) => s.marca)];
-    const tableRows = porMarca.meses.map((m, i) => [m, ...porMarca.series.map((s) => fmtUSD(s.data[i]))]);
+  if (breakdown && breakdown.series.length) {
+    const headers = ['Mes', ...breakdown.series.map((s) => s.nombre)];
+    const tableRows = breakdown.meses.map((m, i) => [m, ...breakdown.series.map((s) => fmtUSD(s.data[i]))]);
     renderTable('monthTable', headers, tableRows);
   } else {
     renderTable('monthTable', ['Mes', 'Filas', 'FOB', 'CIF'], rows.map((r) => [r.anio_mes, fmtInt(r.filas), fmtUSD(r.fob), fmtUSD(r.cif)]));

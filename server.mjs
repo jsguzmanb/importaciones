@@ -252,7 +252,48 @@ app.get('/api/by-molecula', async (req, res, next) => {
   }
 });
 
-const TOP_BRANDS_IN_MONTH_CHART = 5;
+const TOP_SERIES_IN_MONTH_CHART = 5;
+
+// Agrega FOB mensual por una columna (marca o molecula) dentro del recorte ya filtrado
+// por where/extraWhere/params, quedándose con las top N por FOB total y agrupando el
+// resto en "Otras" -- usado para no saturar la gráfica de líneas con una serie por cada
+// valor distinto. `total` son las filas ya agregadas por mes (para tomar la lista de
+// meses del período), `groupCol` es la columna real de la tabla ('marca' o 'molecula').
+async function computeBreakdownSeries(pool, groupCol, where, extraWhere, params, total) {
+  const { rows: groupTotals } = await pool.query(
+    `SELECT COALESCE(${groupCol}, 'Sin clasificar') as nombre, SUM(${FOB}) as fob
+     FROM ${TABLE} ${where} ${extraWhere}
+     GROUP BY nombre
+     ORDER BY fob DESC`,
+    params
+  );
+  const topNames = groupTotals.slice(0, TOP_SERIES_IN_MONTH_CHART).map((r) => r.nombre);
+  const { rows: monthly } = await pool.query(
+    `SELECT anio_mes, COALESCE(${groupCol}, 'Sin clasificar') as nombre, SUM(${FOB}) as fob
+     FROM ${TABLE} ${where} ${extraWhere}
+     GROUP BY anio_mes, nombre`,
+    params
+  );
+  const meses = total.map((r) => r.anio_mes);
+  const series = topNames.map((nombre) => ({
+    nombre,
+    data: meses.map((m) => {
+      const row = monthly.find((r) => r.anio_mes === m && r.nombre === nombre);
+      return row ? Number(row.fob) : 0;
+    }),
+  }));
+  if (groupTotals.length > TOP_SERIES_IN_MONTH_CHART) {
+    series.push({
+      nombre: 'Otras',
+      data: meses.map((m) =>
+        monthly
+          .filter((r) => r.anio_mes === m && !topNames.includes(r.nombre))
+          .reduce((sum, r) => sum + Number(r.fob), 0)
+      ),
+    });
+  }
+  return { meses, series };
+}
 
 // ?condicion= y/o ?molecula= restringen la evolución mensual al recorte que el
 // usuario esté viendo en el drill-down de Condición -> Molécula -> Marca, para que la
@@ -260,11 +301,10 @@ const TOP_BRANDS_IN_MONTH_CHART = 5;
 // total general. condicion se resuelve vía condicionPorMolecula (igual que
 // /api/by-condicion), ya que no es una columna real de la tabla.
 //
-// Cuando el drill-down ya está en un nivel de molécula puntual (?molecula=), además del
-// total se calcula el desglose mensual por marca: se identifican las top N marcas por
-// FOB total dentro de esa molécula y se agrupa el resto bajo "Otras", para no saturar la
-// gráfica de líneas con una serie por cada marca. A nivel condición (que agrupa muchas
-// moléculas/marcas sin un foco claro) no aplica -- solo se devuelve el total.
+// Además del total, se calcula un desglose mensual por líneas: por marca cuando ya hay
+// una molécula puntual seleccionada (?molecula=), o por molécula en cualquier otro caso
+// (condición seleccionada, o vista general/búsqueda sin drill-down) -- top N por FOB
+// total, agrupando el resto en "Otras" para no saturar la gráfica de líneas.
 app.get('/api/by-month', async (req, res, next) => {
   try {
     const pool = getPool();
@@ -283,7 +323,7 @@ app.get('/api/by-month', async (req, res, next) => {
           (m) => (focusMoleculas.condicionPorMolecula[m] ?? 'Sin condición') === condicion
         );
         if (moleculasDeCondicion.length === 0) {
-          res.json({ total: [], porMarca: null });
+          res.json({ total: [], breakdown: null });
           return;
         }
         params.push(moleculasDeCondicion);
@@ -301,42 +341,12 @@ app.get('/api/by-month', async (req, res, next) => {
       params
     );
 
-    let porMarca = null;
-    if (molecula) {
-      const { rows: brandTotals } = await pool.query(
-        `SELECT COALESCE(marca, 'Sin marca') as marca, SUM(${FOB}) as fob
-         FROM ${TABLE} ${where} ${extraWhere}
-         GROUP BY marca
-         ORDER BY fob DESC`,
-        params
-      );
-      const topBrands = brandTotals.slice(0, TOP_BRANDS_IN_MONTH_CHART).map((r) => r.marca);
-      const { rows: monthly } = await pool.query(
-        `SELECT anio_mes, COALESCE(marca, 'Sin marca') as marca, SUM(${FOB}) as fob
-         FROM ${TABLE} ${where} ${extraWhere}
-         GROUP BY anio_mes, marca`,
-        params
-      );
-      const meses = total.map((r) => r.anio_mes);
-      const series = topBrands.map((marca) => ({
-        marca,
-        data: meses.map((m) => {
-          const row = monthly.find((r) => r.anio_mes === m && r.marca === marca);
-          return row ? Number(row.fob) : 0;
-        }),
-      }));
-      const otrasData = meses.map((m) =>
-        monthly
-          .filter((r) => r.anio_mes === m && !topBrands.includes(r.marca))
-          .reduce((sum, r) => sum + Number(r.fob), 0)
-      );
-      if (brandTotals.length > TOP_BRANDS_IN_MONTH_CHART) {
-        series.push({ marca: 'Otras', data: otrasData });
-      }
-      porMarca = { meses, series };
-    }
+    const groupCol = molecula ? 'marca' : 'molecula';
+    const breakdown = total.length
+      ? { by: groupCol, ...(await computeBreakdownSeries(pool, groupCol, where, extraWhere, params, total)) }
+      : null;
 
-    res.json({ total, porMarca });
+    res.json({ total, breakdown });
   } catch (err) {
     next(err);
   }
