@@ -252,11 +252,19 @@ app.get('/api/by-molecula', async (req, res, next) => {
   }
 });
 
+const TOP_BRANDS_IN_MONTH_CHART = 5;
+
 // ?condicion= y/o ?molecula= restringen la evolución mensual al recorte que el
 // usuario esté viendo en el drill-down de Condición -> Molécula -> Marca, para que la
 // gráfica de evolución siga lo que se está explorando en vez de mostrar siempre el
 // total general. condicion se resuelve vía condicionPorMolecula (igual que
 // /api/by-condicion), ya que no es una columna real de la tabla.
+//
+// Cuando el drill-down ya está en un nivel de molécula puntual (?molecula=), además del
+// total se calcula el desglose mensual por marca: se identifican las top N marcas por
+// FOB total dentro de esa molécula y se agrupa el resto bajo "Otras", para no saturar la
+// gráfica de líneas con una serie por cada marca. A nivel condición (que agrupa muchas
+// moléculas/marcas sin un foco claro) no aplica -- solo se devuelve el total.
 app.get('/api/by-month', async (req, res, next) => {
   try {
     const pool = getPool();
@@ -275,7 +283,7 @@ app.get('/api/by-month', async (req, res, next) => {
           (m) => (focusMoleculas.condicionPorMolecula[m] ?? 'Sin condición') === condicion
         );
         if (moleculasDeCondicion.length === 0) {
-          res.json([]);
+          res.json({ total: [], porMarca: null });
           return;
         }
         params.push(moleculasDeCondicion);
@@ -285,14 +293,50 @@ app.get('/api/by-month', async (req, res, next) => {
 
     const extra = where ? 'AND' : 'WHERE';
     const extraWhere = clauses.length ? `${extra} ${clauses.join(' AND ')}` : '';
-    const { rows } = await pool.query(
+    const { rows: total } = await pool.query(
       `SELECT anio_mes, COUNT(*) as filas, SUM(${FOB}) as fob, SUM(${CIF}) as cif
        FROM ${TABLE} ${where} ${extraWhere}
        GROUP BY anio_mes
        ORDER BY anio_mes ASC`,
       params
     );
-    res.json(rows);
+
+    let porMarca = null;
+    if (molecula) {
+      const { rows: brandTotals } = await pool.query(
+        `SELECT COALESCE(marca, 'Sin marca') as marca, SUM(${FOB}) as fob
+         FROM ${TABLE} ${where} ${extraWhere}
+         GROUP BY marca
+         ORDER BY fob DESC`,
+        params
+      );
+      const topBrands = brandTotals.slice(0, TOP_BRANDS_IN_MONTH_CHART).map((r) => r.marca);
+      const { rows: monthly } = await pool.query(
+        `SELECT anio_mes, COALESCE(marca, 'Sin marca') as marca, SUM(${FOB}) as fob
+         FROM ${TABLE} ${where} ${extraWhere}
+         GROUP BY anio_mes, marca`,
+        params
+      );
+      const meses = total.map((r) => r.anio_mes);
+      const series = topBrands.map((marca) => ({
+        marca,
+        data: meses.map((m) => {
+          const row = monthly.find((r) => r.anio_mes === m && r.marca === marca);
+          return row ? Number(row.fob) : 0;
+        }),
+      }));
+      const otrasData = meses.map((m) =>
+        monthly
+          .filter((r) => r.anio_mes === m && !topBrands.includes(r.marca))
+          .reduce((sum, r) => sum + Number(r.fob), 0)
+      );
+      if (brandTotals.length > TOP_BRANDS_IN_MONTH_CHART) {
+        series.push({ marca: 'Otras', data: otrasData });
+      }
+      porMarca = { meses, series };
+    }
+
+    res.json({ total, porMarca });
   } catch (err) {
     next(err);
   }

@@ -104,11 +104,19 @@ function destroyChart(id) {
 // nivel superior, para poder reconstruir el breadcrumb y volver atrás.
 let moleculaView = { level: 'molecula', path: {} };
 
+// Alto de barra + separación entre categorías, en px — se usa tanto para el grosor
+// real de la barra (categoryPercentage/barPercentage) como para calcular el alto del
+// contenedor, de forma que el desglose por marca/molécula (que puede traer 20-30+
+// filas) quepa sin scroll interno del canvas ni forzar scroll de página.
+const BAR_ROW_HEIGHT = 20;
+const BAR_CHART_MIN_HEIGHT = 260;
+
 function renderMoleculaBarChart(rows, labelKey, onBarClick) {
   destroyChart('moleculaChart');
   const { grid } = chartDefaults();
   const colors = seriesColors();
   const ctx = document.getElementById('moleculaChart');
+  ctx.parentElement.style.height = `${Math.max(BAR_CHART_MIN_HEIGHT, rows.length * BAR_ROW_HEIGHT)}px`;
   charts.moleculaChart = new Chart(ctx, {
     type: 'bar',
     data: {
@@ -118,8 +126,10 @@ function renderMoleculaBarChart(rows, labelKey, onBarClick) {
           label: 'Valor FOB (USD)',
           data: rows.map((r) => r.fob),
           backgroundColor: rows.map((_, i) => colors[i % colors.length]),
-          borderRadius: 4,
-          maxBarThickness: 22,
+          borderRadius: 3,
+          maxBarThickness: 14,
+          categoryPercentage: 0.9,
+          barPercentage: 0.9,
         },
       ],
     },
@@ -143,7 +153,7 @@ function renderMoleculaBarChart(rows, labelKey, onBarClick) {
       },
       scales: {
         x: { grid: { color: grid }, ticks: { callback: (v) => fmtUSD(v) } },
-        y: { grid: { display: false }, ticks: { autoSkip: false } },
+        y: { grid: { display: false }, ticks: { autoSkip: false, font: { size: 10 } } },
       },
     },
   });
@@ -237,45 +247,63 @@ async function loadMoleculaChart() {
 }
 
 async function loadMonthChart() {
-  const rows = await fetchJSON(`/api/by-month${monthQs(state)}`);
+  const { total, porMarca } = await fetchJSON(`/api/by-month${monthQs(state)}`);
   const label = moleculaView.path.molecula || moleculaView.path.condicion;
   document.getElementById('monthSubtitle').textContent = label
     ? `Valor FOB y CIF importado por mes — ${label}.`
     : 'Valor FOB y CIF importado por mes.';
-  renderMonthChart(rows);
+  renderMonthChart(total, porMarca);
 }
 
-function renderMonthChart(rows) {
+// porMarca (solo presente cuando el drill-down está a nivel de una molécula puntual,
+// ver /api/by-month) trae una línea de FOB por cada una de las top N marcas más una
+// serie "Otras" agrupando el resto — reemplaza la vista de FOB/CIF total, ya que ambas
+// no caben con claridad en la misma gráfica de líneas.
+function renderMonthChart(rows, porMarca) {
   lastData.month = rows;
   destroyChart('monthChart');
   const { grid } = chartDefaults();
   const colors = seriesColors();
   const ctx = document.getElementById('monthChart');
-  charts.monthChart = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels: rows.map((r) => r.anio_mes),
-      datasets: [
-        {
-          label: 'FOB',
-          data: rows.map((r) => r.fob),
-          borderColor: colors[0],
-          backgroundColor: colors[0] + '33',
-          fill: true,
-          tension: 0.25,
-          pointRadius: 3,
-          borderWidth: 2,
-        },
-        {
-          label: 'CIF',
-          data: rows.map((r) => r.cif),
-          borderColor: colors[1],
+
+  const datasets =
+    porMarca && porMarca.series.length
+      ? porMarca.series.map((s, i) => ({
+          label: s.marca,
+          data: s.data,
+          borderColor: colors[i % colors.length],
           backgroundColor: 'transparent',
           tension: 0.25,
           pointRadius: 3,
           borderWidth: 2,
-        },
-      ],
+        }))
+      : [
+          {
+            label: 'FOB',
+            data: rows.map((r) => r.fob),
+            borderColor: colors[0],
+            backgroundColor: colors[0] + '33',
+            fill: true,
+            tension: 0.25,
+            pointRadius: 3,
+            borderWidth: 2,
+          },
+          {
+            label: 'CIF',
+            data: rows.map((r) => r.cif),
+            borderColor: colors[1],
+            backgroundColor: 'transparent',
+            tension: 0.25,
+            pointRadius: 3,
+            borderWidth: 2,
+          },
+        ];
+
+  charts.monthChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: (porMarca ? porMarca.meses : rows.map((r) => r.anio_mes)),
+      datasets,
     },
     options: {
       responsive: true,
@@ -291,7 +319,14 @@ function renderMonthChart(rows) {
       },
     },
   });
-  renderTable('monthTable', ['Mes', 'Filas', 'FOB', 'CIF'], rows.map((r) => [r.anio_mes, fmtInt(r.filas), fmtUSD(r.fob), fmtUSD(r.cif)]));
+
+  if (porMarca && porMarca.series.length) {
+    const headers = ['Mes', ...porMarca.series.map((s) => s.marca)];
+    const tableRows = porMarca.meses.map((m, i) => [m, ...porMarca.series.map((s) => fmtUSD(s.data[i]))]);
+    renderTable('monthTable', headers, tableRows);
+  } else {
+    renderTable('monthTable', ['Mes', 'Filas', 'FOB', 'CIF'], rows.map((r) => [r.anio_mes, fmtInt(r.filas), fmtUSD(r.fob), fmtUSD(r.cif)]));
+  }
 }
 
 function renderSimpleBar(canvasId, tableId, rows, labelKey) {
